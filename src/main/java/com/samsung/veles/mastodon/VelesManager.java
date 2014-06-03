@@ -3,6 +3,13 @@ package com.samsung.veles.mastodon;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.Socket;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -11,6 +18,10 @@ import org.tukaani.xz.XZInputStream;
 import org.tukaani.xz.XZOutputStream;
 import org.xerial.snappy.SnappyInputStream;
 import org.xerial.snappy.SnappyOutputStream;
+
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 
 import net.razorvine.pickle.PickleException;
 import net.razorvine.pickle.Pickler;
@@ -44,8 +55,11 @@ public class VelesManager {
   private String _host;
   private int _port;
   private String _workflowId;
+  private Map<String, Map<String, String>> _endpoints =
+      new TreeMap<String, Map<String, String>>();
   
-  public void connect(String host, int port, String workflowId) {
+  public void connect(String host, int port, String workflowId)
+      throws UnknownHostException, IOException {
     synchronized (this) {
       _host = host;
       _port = port;
@@ -54,7 +68,75 @@ public class VelesManager {
     }
   }
   
-  private void refresh() {
+  private void refresh() throws UnknownHostException, IOException {
+    ArrayList<byte[]> response = new ArrayList<byte[]>();
+    int total_length = 0;
+    // Send the request to master node
+    Socket master = new Socket(this._host, this._port);
+    try {
+      InputStream in = master.getInputStream();
+      OutputStream out = master.getOutputStream();
+      JSONObject json = new JSONObject();
+      json.put("query", "nodes");
+      out.write(JSON.toJSONBytes(json));      
+      int length = 0;      
+      int bufsize = 1024;
+      byte[] head = null;
+      do {
+        head = new byte[bufsize];
+        response.add(head);
+        length = in.read(head);
+        total_length += length;
+      }
+      while (length == bufsize && head[length - 1] != '\n');
+    }
+    finally {
+      master.close();
+    }
+    // Merge response chunks into a continuous array
+    byte[] all = null;
+    if (response.size() > 1) {
+      all = new byte[total_length];
+      int offset = 0;
+      for (int i = 0; i < response.size(); i++) {
+        byte[] chunk = response.get(i);
+        System.arraycopy(chunk, 0, all, offset, chunk.length);
+        offset += chunk.length;
+      }
+    } else {
+      all = response.get(0);
+    }
+    // Parse the response - JSON bytes
+    JSONObject parsed = (JSONObject)JSON.parse(all);
+    _endpoints.clear();
+    for (String key : parsed.keySet()) {
+      // For each node with ID = key
+      Map<String, String> endpoints = new TreeMap<String, String>();
+      JSONObject body = parsed.getJSONObject(key);
+      JSONArray data = body.getJSONArray("data");
+      JSONObject raw_endpoints = null;
+      String hostname = body.getString("host");
+      for (Object item : data) {
+        if (item == null) {
+          continue;
+        }
+        raw_endpoints = (JSONObject)((JSONObject)item).get(
+            "ZmqLoaderEndpoints");
+        break;
+      }
+      // Now we have JSONObject with endpoints, raw_endpoints.
+      // Iterate over endpoint types: tcp, ipc, etc.
+      for (Entry<String, Object> kv : raw_endpoints.entrySet()) {
+        String value = ((JSONArray)kv.getValue()).getString(1);
+        // tcp endpoint may contain * instead of IP address
+        if (kv.getKey().equals("tcp")) {
+          value = value.replace("*", hostname);
+        }
+        endpoints.put(kv.getKey(), value);
+      }
+      _endpoints.put(key, endpoints);
+    }
+    // TODO(v.markovtsev): select the optimal endpoint
     // TODO(v.markovtsev): implement creating _out and _in
   }
   
