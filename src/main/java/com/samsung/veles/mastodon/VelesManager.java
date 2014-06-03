@@ -91,9 +91,15 @@ public class VelesManager {
     return res;
   }
   
+  private static final byte PICKLE_BEGIN[] = {'v', 'p', 'b'};
+  private static final byte PICKLE_END[] = {'v', 'p', 'e'};
+
   private static OutputStream getCompressedStream(OutputStream output,
       Compression compression) throws IOException {
-    output.write(compression.ordinal());
+    byte mark[] = new byte[PICKLE_BEGIN.length + 1];
+    System.arraycopy(PICKLE_BEGIN, 0, mark, 0, PICKLE_BEGIN.length);
+    mark[mark.length - 1] = (byte)compression.ordinal();
+    output.write(mark);
     switch (compression) {
       case None:
         return output;
@@ -110,7 +116,14 @@ public class VelesManager {
   
   private static InputStream getUncompressedStream(InputStream input)
       throws IOException {
-    Compression format = Compression.values()[input.read()];
+    byte[] mark = new byte[PICKLE_END.length + 1];
+    input.read(mark);
+    for (int i = 0; i < PICKLE_END.length; i++) {
+      if (mark[i] != PICKLE_END[i]) {
+        throw new IOException("Invalid stream format");
+      }
+    }
+    Compression format = Compression.values()[mark[mark.length - 1]];
     switch (format) {
       case None:
         return input;
