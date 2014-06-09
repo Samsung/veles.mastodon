@@ -1,6 +1,10 @@
 package com.samsung.veles.mastodon;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
+import java.security.NoSuchAlgorithmException;
 
 import junit.framework.Test;
 import junit.framework.TestCase;
@@ -43,5 +47,20 @@ public class VelesManagerTest extends TestCase {
         + "\"inproc://veles-zmqloader-ZeroMQLoader\"], \"tcp\": "
         + "[\"connect\", \"tcp://*:52937\"], \"ipc\": [\"connect\", "
         + "\"ipc:///tmp/veles-ipc-zmqloader-dnioqryd\"]}}, null]}}");
+  }
+
+  public void testChecksum() throws IOException {
+    File tmp = File.createTempFile("mastodon-test-", ".txt");
+    PrintWriter writer = new PrintWriter(tmp.getAbsolutePath(), "ASCII");
+    writer.println("test text to check VelesManager.checksum()");
+    writer.close();
+    tmp.delete();
+    String cs = null;
+    try {
+      cs = VelesManager.checksum(tmp.getAbsolutePath());
+    } catch (NoSuchAlgorithmException e) {
+      fail(e.getMessage());
+    }
+    assertEquals("2fbb51403bc48c145de6febf39193e42c34ef846", cs);
   }
 }

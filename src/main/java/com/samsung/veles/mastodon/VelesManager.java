@@ -1,11 +1,17 @@
 package com.samsung.veles.mastodon;
 
+import java.io.BufferedInputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Formatter;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.TreeMap;
@@ -48,13 +54,46 @@ public class VelesManager {
     return _instance;
   }
 
+  /**
+   * Calculates the checksum of the file with Veles model. It can be passed in
+   * to {@link #connect(String, int, String) connect()} as workflowId.
+   *
+   * @return String with SHA1 file hash.
+   * @throws NoSuchAlgorithmException, IOException
+   */
+  public static String checksum(String fileName)
+      throws NoSuchAlgorithmException, IOException {
+    FileInputStream fis = new FileInputStream(fileName);
+    BufferedInputStream bis = new BufferedInputStream(fis);
+    MessageDigest sha1 = MessageDigest.getInstance("SHA1");
+    DigestInputStream dis = new DigestInputStream(bis, sha1);
+
+    try {
+      while (dis.read() != -1);
+    } finally {
+      dis.close();
+    }
+
+    byte[] hash = sha1.digest();
+
+    Formatter formatter = new Formatter();
+    for (byte b : hash) {
+        formatter.format("%02x", b);
+    }
+    String result = formatter.toString();
+    formatter.close();
+
+    return result;
+  }
+
   private String _host;
   private int _port;
   private String _workflowId;
   private final Map<String, Map<String, String>> _endpoints =
       new TreeMap<String, Map<String, String>>();
 
-  public void connect(String host, int port, String workflowId) throws UnknownHostException,
+  public void connect(String host, int port, String workflowId)
+      throws UnknownHostException,
       IOException {
     synchronized (this) {
       _host = host;
@@ -118,7 +157,8 @@ public class VelesManager {
    * @param response Master node response (JSON).
    * @throws UnknownHostException
    */
-  private void updateZmqEndpoints(byte[] response) throws UnknownHostException {
+  private void updateZmqEndpoints(final byte[] response)
+      throws UnknownHostException {
     // Parse the response - JSON bytes
     JSONObject parsed = (JSONObject) JSON.parse(response);
     _endpoints.clear();
@@ -132,7 +172,8 @@ public class VelesManager {
       for (Object item : data) {
         if (item == null)
           continue;
-        raw_endpoints = (JSONObject) ((JSONObject) item).get("ZmqLoaderEndpoints");
+        raw_endpoints = (JSONObject) ((JSONObject) item).get(
+            "ZmqLoaderEndpoints");
         break;
       }
       // Iterate over endpoint types: tcp, ipc, etc.
@@ -179,7 +220,8 @@ public class VelesManager {
     return execute(job, Compression.Snappy);
   }
 
-  public Object execute(Object job, Compression compression) throws PickleException, IOException {
+  public Object execute(Object job, Compression compression)
+      throws PickleException, IOException {
     Object res = null;
     synchronized (this) {
       _pickler.dump(job, getCompressedStream(_out, compression));
@@ -192,8 +234,8 @@ public class VelesManager {
   private static final byte PICKLE_BEGIN[] = {'v', 'p', 'b'};
   private static final byte PICKLE_END[] = {'v', 'p', 'e'};
 
-  private static OutputStream getCompressedStream(OutputStream output, Compression compression)
-      throws IOException {
+  private static OutputStream getCompressedStream(
+      OutputStream output, Compression compression) throws IOException {
     byte mark[] = new byte[PICKLE_BEGIN.length + 1];
     System.arraycopy(PICKLE_BEGIN, 0, mark, 0, PICKLE_BEGIN.length);
     mark[mark.length - 1] = (byte) compression.ordinal();
@@ -212,7 +254,8 @@ public class VelesManager {
     }
   }
 
-  private static InputStream getUncompressedStream(InputStream input) throws IOException {
+  private static InputStream getUncompressedStream(InputStream input)
+      throws IOException {
     byte[] mark = new byte[PICKLE_END.length + 1];
     input.read(mark);
     for (int i = 0; i < PICKLE_END.length; i++) {
