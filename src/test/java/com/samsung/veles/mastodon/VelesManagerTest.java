@@ -14,6 +14,8 @@ import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
 
+import org.zeromq.ZMQ;
+
 /**
  * Unit test for VelesManager.
  */
@@ -92,6 +94,85 @@ public class VelesManagerTest extends TestCase {
     assertEquals("ipc:///tmp/veles-ipc-zmqloader-dnioqryd", ep);
     ep = val.get("tcp");
     assertEquals("tcp://markovtsevu64:52937", ep);
+  }
+
+  public void testOpenStreams() {
+    Field field = null;
+    try {
+      field = VelesManager.class.getDeclaredField("_context");
+    } catch (NoSuchFieldException | SecurityException e) {
+      fail(e.getMessage());
+    }
+    field.setAccessible(true);
+    ZMQ.Context context = null;
+    try {
+      context = (ZMQ.Context) field.get(VelesManager.instance());
+    } catch (IllegalArgumentException | IllegalAccessException e) {
+      fail(e.getMessage());
+    }
+    ZMQ.Socket sock = context.socket(ZMQ.ROUTER);
+    String endpoint = "inproc://VelesManager-test";
+    sock.bind(endpoint);
+    String data = "test_data";
+    sock.send(data, ZMQ.NOBLOCK);
+
+    try {
+      field = VelesManager.class.getDeclaredField("_currentEndpoint");
+    } catch (NoSuchFieldException | SecurityException e) {
+      fail(e.getMessage());
+    }
+    field.setAccessible(true);
+    try {
+      field.set(VelesManager.instance(), endpoint);
+    } catch (IllegalArgumentException | IllegalAccessException e) {
+      fail(e.getMessage());
+    }
+
+    Method method = null;
+    try {
+      method = VelesManager.class.getDeclaredMethod("openStreams");
+    } catch (NoSuchMethodException | SecurityException e) {
+      fail(e.getMessage());
+    }
+    method.setAccessible(true);
+    try {
+      method.invoke(VelesManager.instance());
+    } catch (IllegalAccessException | IllegalArgumentException |
+        InvocationTargetException e) {
+      fail(e.getMessage());
+    }
+
+    try {
+      field = VelesManager.class.getDeclaredField("_in");
+    } catch (NoSuchFieldException | SecurityException e) {
+      fail(e.getMessage());
+    }
+    field.setAccessible(true);
+    ZeroMQInputStream in = null;
+    try {
+      in = (ZeroMQInputStream) field.get(VelesManager.instance());
+    } catch (IllegalArgumentException | IllegalAccessException e) {
+      fail(e.getMessage());
+    }
+
+    try {
+      field = VelesManager.class.getDeclaredField("_out");
+    } catch (NoSuchFieldException | SecurityException e) {
+      fail(e.getMessage());
+    }
+    field.setAccessible(true);
+    ZeroMQOutputStream out = null;
+    try {
+      out = (ZeroMQOutputStream) field.get(VelesManager.instance());
+    } catch (IllegalArgumentException | IllegalAccessException e) {
+      fail(e.getMessage());
+    }
+
+    byte[] buffer = new byte[100];
+    in.read(buffer);
+    String ret = new String(buffer);
+
+    assertEquals(data, ret);
   }
 
   public void testChecksum() throws IOException {

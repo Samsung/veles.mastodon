@@ -27,6 +27,7 @@ import org.tukaani.xz.XZInputStream;
 import org.tukaani.xz.XZOutputStream;
 import org.xerial.snappy.SnappyInputStream;
 import org.xerial.snappy.SnappyOutputStream;
+import org.zeromq.ZMQ;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -91,6 +92,7 @@ public class VelesManager {
   private String _workflowId;
   private final Map<String, Map<String, String>> _endpoints =
       new TreeMap<String, Map<String, String>>();
+  private String _currentEndpoint;
 
   public void connect(String host, int port, String workflowId)
       throws UnknownHostException,
@@ -120,6 +122,7 @@ public class VelesManager {
       OutputStream out = master.getOutputStream();
       JSONObject json = new JSONObject();
       json.put("query", "nodes");
+      json.put("workflow", _workflowId);
       out.write(JSON.toJSONBytes(json));
       int length = 0;
       int bufsize = 1024;
@@ -189,6 +192,21 @@ public class VelesManager {
     }
   }
 
+  private void chooseEndpoint() {
+    _currentEndpoint = "";
+  }
+
+  /**
+   * Creates a new ZeroMQ DEALER socket, reassigns input and output streams.
+   *
+   */
+  private void openStreams() {
+    ZMQ.Socket socket = _context.socket(ZMQ.DEALER);
+    socket.connect(_currentEndpoint);
+    _in = new ZeroMQInputStream(socket);
+    _out = new ZeroMQOutputStream(socket);
+  }
+
   private void refresh() throws UnknownHostException, IOException {
     // Get response from master node
     byte[] response = getResponseFromMaster();
@@ -196,7 +214,8 @@ public class VelesManager {
     updateZmqEndpoints(response);
 
     // TODO(v.markovtsev): select the optimal endpoint
-    // TODO(v.markovtsev): implement creating _out and _in
+    chooseEndpoint();
+    openStreams();
   }
 
   public String getHost() {
@@ -209,6 +228,7 @@ public class VelesManager {
 
   private Pickler _pickler;
   private Unpickler _unpickler;
+  private final ZMQ.Context _context = ZMQ.context(1);
   private ZeroMQOutputStream _out;
   private ZeroMQInputStream _in;
 
