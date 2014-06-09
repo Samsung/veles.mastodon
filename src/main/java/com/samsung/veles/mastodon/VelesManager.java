@@ -109,7 +109,7 @@ public class VelesManager {
    * @return Response from master node as continuous byte array.
    * @throws IOException
    */
-  private byte[] getMasterResponse() throws IOException {
+  private byte[] getResponseFromMaster() throws IOException {
     ArrayList<byte[]> response = new ArrayList<byte[]>();
     int total_length = 0;
 
@@ -191,7 +191,7 @@ public class VelesManager {
 
   private void refresh() throws UnknownHostException, IOException {
     // Get response from master node
-    byte[] response = getMasterResponse();
+    byte[] response = getResponseFromMaster();
     // update map of ZeroMQ endpoints
     updateZmqEndpoints(response);
 
@@ -205,10 +205,6 @@ public class VelesManager {
 
   public int getPort() {
     return _port;
-  }
-
-  public String getWorkflowId() {
-    return _workflowId;
   }
 
   private Pickler _pickler;
