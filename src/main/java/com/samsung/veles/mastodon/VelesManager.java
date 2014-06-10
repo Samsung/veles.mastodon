@@ -11,9 +11,12 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Formatter;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Random;
 import java.util.TreeMap;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -22,6 +25,7 @@ import net.razorvine.pickle.PickleException;
 import net.razorvine.pickle.Pickler;
 import net.razorvine.pickle.Unpickler;
 
+import org.apache.log4j.Logger;
 import org.tukaani.xz.LZMA2Options;
 import org.tukaani.xz.XZInputStream;
 import org.tukaani.xz.XZOutputStream;
@@ -38,6 +42,9 @@ import com.alibaba.fastjson.JSONObject;
  *
  */
 public class VelesManager {
+
+  static Logger log = Logger.getLogger(VelesManager.class.getName());
+
   public enum Compression {
     None, Gzip, Snappy, Lzma2
   }
@@ -53,6 +60,34 @@ public class VelesManager {
       }
     }
     return _instance;
+  }
+
+  public static class ZmqEndpoint {
+    public ZmqEndpoint(String host, String type, String uri) {
+      this.host = host;
+      this.uri = uri;
+      this.type = type;
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (other == null) return false;
+      if (other == this) return true;
+      if (!(other instanceof ZmqEndpoint)) return false;
+
+      ZmqEndpoint endpoint = (ZmqEndpoint)other;
+      if (this.host.equals(endpoint.host) &&
+          this.uri.equals(endpoint.uri) &&
+          this.type.equals(endpoint.type)) {
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    public String host;
+    public String uri;
+    public String type;
   }
 
   /**
@@ -90,13 +125,12 @@ public class VelesManager {
   private String _host;
   private int _port;
   private String _workflowId;
-  private final Map<String, Map<String, String>> _endpoints =
-      new TreeMap<String, Map<String, String>>();
-  private String _currentEndpoint;
+  private final Map<String, List<ZmqEndpoint>> _endpoints =
+      new TreeMap<String, List<ZmqEndpoint>>();
+  private ZmqEndpoint _currentEndpoint;
 
   public void connect(String host, int port, String workflowId)
-      throws UnknownHostException,
-      IOException {
+      throws UnknownHostException, IOException {
     synchronized (this) {
       _host = host;
       _port = port;
@@ -167,7 +201,6 @@ public class VelesManager {
     _endpoints.clear();
     for (String key : parsed.keySet()) {
       // For each node with ID = key
-      Map<String, String> endpoints = new TreeMap<String, String>();
       JSONObject body = parsed.getJSONObject(key);
       JSONArray data = body.getJSONArray("data");
       JSONObject raw_endpoints = null;
@@ -180,20 +213,17 @@ public class VelesManager {
         break;
       }
       // Iterate over endpoint types: tcp, ipc, etc.
+      List<ZmqEndpoint> endpoints = new ArrayList<ZmqEndpoint>();
       for (Entry<String, Object> kv : raw_endpoints.entrySet()) {
-        String value = ((JSONArray) kv.getValue()).getString(1);
+        String uri = ((JSONArray) kv.getValue()).getString(1);
         // tcp endpoint may contain * instead of IP address
         if (kv.getKey().equals("tcp")) {
-          value = value.replace("*", hostname);
+          uri = uri.replace("*", hostname);
         }
-        endpoints.put(kv.getKey(), value);
+        endpoints.add(new ZmqEndpoint(hostname, kv.getKey(), uri));
       }
       _endpoints.put(key, endpoints);
     }
-  }
-
-  private void chooseEndpoint() {
-    _currentEndpoint = "";
   }
 
   /**
@@ -202,9 +232,44 @@ public class VelesManager {
    */
   private void openStreams() {
     ZMQ.Socket socket = _context.socket(ZMQ.DEALER);
-    socket.connect(_currentEndpoint);
+    socket.connect(_currentEndpoint.uri);
     _in = new ZeroMQInputStream(socket);
     _out = new ZeroMQOutputStream(socket);
+  }
+
+  public interface Metrics {
+    public float distance(String host1, String host2);
+  }
+
+  public class SimpleMetrics implements Metrics {
+    @Override
+    public float distance(String host1, String host2) {
+      return host1.equals(host2) ? 0 : 1;
+    }
+  }
+
+  /**
+   * Choose nearest ZeroMQ endpoint to current local host using specified
+   * metrics.
+   *
+   * @param metrics Functor to measure distance between two hosts.
+   * @return Nearest ZeroMQ endpoint to the current local host.
+   * @throws UnknownHostException
+   */
+  private void chooseZmqEndpoint(Metrics metrics)
+      throws UnknownHostException {
+    java.net.InetAddress localHost = java.net.InetAddress.getLocalHost();
+    String curHostName = localHost.getHostName();
+    Map<Float, List<ZmqEndpoint>> dist = new TreeMap<Float, List<ZmqEndpoint>>();
+    for (Entry<String, List<ZmqEndpoint>> entry : _endpoints.entrySet()) {
+      for (final ZmqEndpoint endpoint : entry.getValue()) {
+        dist.put(metrics.distance(endpoint.host, curHostName), entry.getValue());
+      }
+    }
+
+    List<ZmqEndpoint> list = dist.get(Collections.min(dist.keySet()));
+    Random generator = new Random();
+    _currentEndpoint = list.get(generator.nextInt(list.size()));
   }
 
   private void refresh() throws UnknownHostException, IOException {
@@ -212,9 +277,8 @@ public class VelesManager {
     byte[] response = getResponseFromMaster();
     // update map of ZeroMQ endpoints
     updateZmqEndpoints(response);
-
-    // TODO(v.markovtsev): select the optimal endpoint
-    chooseEndpoint();
+    // select the optimal endpoint
+    chooseZmqEndpoint(new SimpleMetrics());
     openStreams();
   }
 

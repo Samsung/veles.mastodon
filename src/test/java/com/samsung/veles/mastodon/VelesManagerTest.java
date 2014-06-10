@@ -8,6 +8,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.security.NoSuchAlgorithmException;
+import java.util.List;
 import java.util.Map;
 
 import junit.framework.Test;
@@ -15,6 +16,8 @@ import junit.framework.TestCase;
 import junit.framework.TestSuite;
 
 import org.zeromq.ZMQ;
+
+import com.samsung.veles.mastodon.VelesManager.ZmqEndpoint;
 
 /**
  * Unit test for VelesManager.
@@ -52,6 +55,7 @@ public class VelesManagerTest extends TestCase {
         + "\"inproc://veles-zmqloader-ZeroMQLoader\"], \"tcp\": "
         + "[\"connect\", \"tcp://*:52937\"], \"ipc\": [\"connect\", "
         + "\"ipc:///tmp/veles-ipc-zmqloader-dnioqryd\"]}}, null]}}").getBytes();
+    // get VelesManager.updateZmqEndpoints() method
     Method method = null;
     try {
       method = VelesManager.class.getDeclaredMethod("updateZmqEndpoints",
@@ -66,6 +70,8 @@ public class VelesManagerTest extends TestCase {
         InvocationTargetException e2) {
       fail(e2.getMessage());
     }
+
+    // get updated VelesManager field _endpoints
     Field field = null;
     try {
       field = VelesManager.class.getDeclaredField("_endpoints");
@@ -73,27 +79,29 @@ public class VelesManagerTest extends TestCase {
       fail(e3.getMessage());
     }
     field.setAccessible(true);
-    Map<String, Map<String, String>> endpoints = null;
+
+    // check endpoints
+    Map<String, List<ZmqEndpoint>> endpoints = null;
     try {
       endpoints =
-          (Map<String, Map<String, String>>) field.get(VelesManager.instance());
+          (Map<String, List<ZmqEndpoint>>) field.get(VelesManager.instance());
     } catch (IllegalArgumentException | IllegalAccessException e4) {
       fail(e4.getMessage());
     }
     assertEquals(1, endpoints.size());
     assertTrue(endpoints.containsKey("fd8e0fc6-b015-4245-922d-950dea3ac198"));
-    Map<String, String> val = endpoints.get(
+    List<ZmqEndpoint> list = endpoints.get(
         "fd8e0fc6-b015-4245-922d-950dea3ac198");
-    assertEquals(3, val.size());
-    assertTrue(val.containsKey("inproc"));
-    assertTrue(val.containsKey("ipc"));
-    assertTrue(val.containsKey("tcp"));
-    String ep = val.get("inproc");
-    assertEquals("inproc://veles-zmqloader-ZeroMQLoader", ep);
-    ep = val.get("ipc");
-    assertEquals("ipc:///tmp/veles-ipc-zmqloader-dnioqryd", ep);
-    ep = val.get("tcp");
-    assertEquals("tcp://markovtsevu64:52937", ep);
+    assertEquals(3, list.size());
+    ZmqEndpoint gold_endpoint = new ZmqEndpoint("markovtsevu64", "ipc",
+        "ipc:///tmp/veles-ipc-zmqloader-dnioqryd");
+    assertEquals(gold_endpoint, list.get(0));
+    gold_endpoint.type = "tcp";
+    gold_endpoint.uri = "tcp://markovtsevu64:52937";
+    assertEquals(gold_endpoint, list.get(1));
+    gold_endpoint.type = "inproc";
+    gold_endpoint.uri = "inproc://veles-zmqloader-ZeroMQLoader";
+    assertEquals(gold_endpoint, list.get(2));
   }
 
   public void testOpenStreams() {
