@@ -232,6 +232,7 @@ public class VelesManager {
    */
   private void openStreams() {
     ZMQ.Socket socket = _context.socket(ZMQ.DEALER);
+    socket.setIdentity("Mastodon".getBytes());
     socket.connect(_currentEndpoint.uri);
     _in = new ZeroMQInputStream(socket);
     _out = new ZeroMQOutputStream(socket);

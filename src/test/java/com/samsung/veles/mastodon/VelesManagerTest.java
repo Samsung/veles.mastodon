@@ -15,6 +15,8 @@ import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
 
+import org.apache.log4j.BasicConfigurator;
+import org.apache.log4j.Logger;
 import org.zeromq.ZMQ;
 
 import com.samsung.veles.mastodon.VelesManager.ZmqEndpoint;
@@ -23,6 +25,9 @@ import com.samsung.veles.mastodon.VelesManager.ZmqEndpoint;
  * Unit test for VelesManager.
  */
 public class VelesManagerTest extends TestCase {
+
+  static Logger log = Logger.getLogger(VelesManagerTest.class.getName());
+
   /**
    * Create the test case
    *
@@ -30,6 +35,7 @@ public class VelesManagerTest extends TestCase {
    */
   public VelesManagerTest(String testName) {
     super(testName);
+    BasicConfigurator.configure();
   }
 
   /**
@@ -93,36 +99,53 @@ public class VelesManagerTest extends TestCase {
     List<ZmqEndpoint> list = endpoints.get(
         "fd8e0fc6-b015-4245-922d-950dea3ac198");
     assertEquals(3, list.size());
-    ZmqEndpoint gold_endpoint = new ZmqEndpoint("markovtsevu64", "ipc",
+    ZmqEndpoint goldEndpoint = new ZmqEndpoint("markovtsevu64", "ipc",
         "ipc:///tmp/veles-ipc-zmqloader-dnioqryd");
-    assertEquals(gold_endpoint, list.get(0));
-    gold_endpoint.type = "tcp";
-    gold_endpoint.uri = "tcp://markovtsevu64:52937";
-    assertEquals(gold_endpoint, list.get(1));
-    gold_endpoint.type = "inproc";
-    gold_endpoint.uri = "inproc://veles-zmqloader-ZeroMQLoader";
-    assertEquals(gold_endpoint, list.get(2));
+    assertEquals(goldEndpoint, list.get(0));
+    goldEndpoint.type = "tcp";
+    goldEndpoint.uri = "tcp://markovtsevu64:52937";
+    assertEquals(goldEndpoint, list.get(1));
+    goldEndpoint.type = "inproc";
+    goldEndpoint.uri = "inproc://veles-zmqloader-ZeroMQLoader";
+    assertEquals(goldEndpoint, list.get(2));
   }
 
-  public void testOpenStreams() {
+  private final String _sendingData = "test data";
+
+  public class Receiver implements Runnable {
+    public String receivedData;
+
+    @Override
+    public void run() {
+      Field field = null;
+      try {
+        field = VelesManager.class.getDeclaredField("_in");
+      } catch (NoSuchFieldException | SecurityException e) {
+        fail(e.getMessage());
+      }
+      field.setAccessible(true);
+      ZeroMQInputStream in = null;
+      try {
+        in = (ZeroMQInputStream) field.get(VelesManager.instance());
+      } catch (IllegalArgumentException | IllegalAccessException e) {
+        fail(e.getMessage());
+      }
+
+      log.debug("start recieving...");
+      byte[] buffer = new byte[_sendingData.length()];
+      in.read(buffer, 0, _sendingData.length());
+      receivedData = new String(buffer);
+      log.debug(String.format("recieved data: %s\n", receivedData));
+    }
+  }
+
+  public void testOpenStreams() throws InterruptedException {
     Field field = null;
-    try {
-      field = VelesManager.class.getDeclaredField("_context");
-    } catch (NoSuchFieldException | SecurityException e) {
-      fail(e.getMessage());
-    }
-    field.setAccessible(true);
-    ZMQ.Context context = null;
-    try {
-      context = (ZMQ.Context) field.get(VelesManager.instance());
-    } catch (IllegalArgumentException | IllegalAccessException e) {
-      fail(e.getMessage());
-    }
+    ZMQ.Context context = ZMQ.context(1);
     ZMQ.Socket sock = context.socket(ZMQ.ROUTER);
-    String endpoint = "inproc://VelesManager-test";
-    sock.bind(endpoint);
-    String data = "test_data";
-    sock.send(data, ZMQ.NOBLOCK);
+    ZmqEndpoint endpoint = new ZmqEndpoint("markovtsevu64", "ipc",
+        "ipc://VelesManager-test.ipc");
+    sock.bind(endpoint.uri);
 
     try {
       field = VelesManager.class.getDeclaredField("_currentEndpoint");
@@ -150,37 +173,16 @@ public class VelesManagerTest extends TestCase {
       fail(e.getMessage());
     }
 
-    try {
-      field = VelesManager.class.getDeclaredField("_in");
-    } catch (NoSuchFieldException | SecurityException e) {
-      fail(e.getMessage());
-    }
-    field.setAccessible(true);
-    ZeroMQInputStream in = null;
-    try {
-      in = (ZeroMQInputStream) field.get(VelesManager.instance());
-    } catch (IllegalArgumentException | IllegalAccessException e) {
-      fail(e.getMessage());
-    }
+    Receiver rec = new Receiver();
+    Thread t = new Thread(rec);
+    t.start();
+    Thread.sleep(1000);
 
-    try {
-      field = VelesManager.class.getDeclaredField("_out");
-    } catch (NoSuchFieldException | SecurityException e) {
-      fail(e.getMessage());
-    }
-    field.setAccessible(true);
-    ZeroMQOutputStream out = null;
-    try {
-      out = (ZeroMQOutputStream) field.get(VelesManager.instance());
-    } catch (IllegalArgumentException | IllegalAccessException e) {
-      fail(e.getMessage());
-    }
-
-    byte[] buffer = new byte[100];
-    in.read(buffer);
-    String ret = new String(buffer);
-
-    assertEquals(data, ret);
+    log.debug(String.format("sending data: %s", _sendingData));
+    sock.send("Mastodon".getBytes(), ZMQ.SNDMORE);
+    sock.send(_sendingData, 0);
+    t.join();
+    assertEquals(_sendingData, rec.receivedData);
   }
 
   public void testChecksum() throws IOException {

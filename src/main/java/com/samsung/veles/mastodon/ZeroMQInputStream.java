@@ -6,12 +6,12 @@ import java.io.InputStream;
 import org.zeromq.ZMQ;
 
 public class ZeroMQInputStream extends InputStream {
-private ZMQ.Socket _socket;
-  
+private final ZMQ.Socket _socket;
+
   public ZeroMQInputStream(ZMQ.Socket socket) {
     _socket = socket;
   }
-  
+
   @Override
   public int read() throws IOException {
     byte[] buf = new byte[] { 0 };
@@ -21,7 +21,7 @@ private ZMQ.Socket _socket;
     }
     return buf[0];
   }
-  
+
   @Override
   public int read(byte[] b) {
     return read(b, 0, b.length);
@@ -30,16 +30,20 @@ private ZMQ.Socket _socket;
   @Override
   public int read(byte[] b, int off, int len) {
     if (!_socket.hasReceiveMore()) {
-      return -1;
+      // current message is not a multi-part
+      //TODO(seninds): add complex logic to receive multi-part message
+      return _socket.recv(b, off, len, 0);
+    } else {
+      // current message is a multi-part
+      return _socket.recv(b, off, len, 0);
     }
-    return _socket.recv(b, off, len, 0);
   }
-  
+
   @Override
   public void close() {
     _socket.close();
   }
-  
+
   @Override
   public int available() {
     if (!_socket.hasReceiveMore()) {
@@ -47,7 +51,7 @@ private ZMQ.Socket _socket;
     }
     return 4;
   }
-  
+
   @Override
   public boolean markSupported() {
     return false;
