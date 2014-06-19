@@ -56,4 +56,8 @@ private final ZMQ.Socket _socket;
   public boolean markSupported() {
     return false;
   }
+
+  public byte[] readMsgPart() {
+    return _socket.recv();
+  }
 }
