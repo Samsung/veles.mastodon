@@ -1,5 +1,5 @@
 eclipse.preferences.version=1
-formatter_profile=_Eclipse 2-spaces-no-tabs
+formatter_profile=_GoogleStyle
 formatter_settings_version=12
 org.eclipse.jdt.ui.exception.name=e
 org.eclipse.jdt.ui.gettersetter.use.is=true
