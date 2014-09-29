@@ -14,7 +14,6 @@
 	</classpathentry>
 	<classpathentry kind="var" path="M2_REPO/junit/junit/4.11/junit-4.11.jar"/>
 	<classpathentry kind="var" path="M2_REPO/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar"/>
-	<classpathentry kind="var" path="M2_REPO/org/zeromq/jzmq/3.0.1/jzmq-3.0.1.jar" sourcepath="M2_REPO/org/zeromq/jzmq/3.0.1/jzmq-3.0.1-sources.jar"/>
 	<classpathentry kind="var" path="M2_REPO/com/alibaba/fastjson/1.1.36/fastjson-1.1.36.jar"/>
 	<classpathentry kind="var" path="M2_REPO/org/tukaani/xz/1.5/xz-1.5.jar"/>
 	<classpathentry kind="var" path="M2_REPO/org/xerial/snappy/snappy-java/1.1.0/snappy-java-1.1.0.jar"/>
@@ -29,5 +28,11 @@
 			<attribute name="maven.pomderived" value="true"/>
 		</attributes>
 	</classpathentry>
+	<classpathentry excluding="**" kind="src" output="target/test-classes" path="src/test/resources">
+		<attributes>
+			<attribute name="maven.pomderived" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="libs/org/zeromq/jzmq/4.0.0/jzmq-4.0.0.jar"/>
 	<classpathentry kind="output" path="target/classes"/>
 </classpath>
