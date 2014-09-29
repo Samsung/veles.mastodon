@@ -40,7 +40,9 @@ public class VelesManagerTest extends TestCase {
    */
   public VelesManagerTest(String testName) {
     super(testName);
-    BasicConfigurator.configure();
+    if (!Logger.getRootLogger().getAllAppenders().hasMoreElements()) {
+      BasicConfigurator.configure();
+    }
   }
 
   /**
