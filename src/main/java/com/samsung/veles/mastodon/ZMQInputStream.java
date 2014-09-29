@@ -10,6 +10,7 @@ public class ZMQInputStream extends InputStream {
   private byte[] _unread;
   private int _unread_pos = 0;
   private boolean _new_message = true;
+  private final byte[] _int_buf = new byte[1];
 
   public ZMQInputStream(ZMQ.Socket socket) {
     _socket = socket;
@@ -17,12 +18,11 @@ public class ZMQInputStream extends InputStream {
 
   @Override
   public int read() throws IOException {
-    byte[] buf = new byte[] {0};
-    int res = read(buf);
+    int res = read(_int_buf);
     if (res == -1) {
       return -1;
     }
-    return buf[0];
+    return _int_buf[0];
   }
 
   @Override
