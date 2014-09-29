@@ -11,10 +11,14 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
+import net.razorvine.pickle.PickleException;
+import net.razorvine.pickle.Pickler;
+import net.razorvine.pickle.Unpickler;
 
 import org.apache.log4j.BasicConfigurator;
 import org.apache.log4j.Logger;
@@ -186,6 +190,28 @@ public class VelesManagerTest extends TestCase {
     String recvMsg = new String(receiver.data());
     log.debug(String.format("received %d bytes: %s", recvMsg.length(), recvMsg));
     assertEquals(testMsg[0].concat(testMsg[1]), recvMsg);
+  }
+
+  public void testPickling() throws PickleException, IOException {
+    Pickler pickler = new Pickler();
+    Unpickler unpickler = new Unpickler();
+    TreeMap<String, Object> map = new TreeMap<>();
+    map.put("Bruce", "Willis");
+    map.put("Arnold", "Schwarzenegger");
+    map.put("Jackie", "Chan");
+    map.put("Sylvester", "Stallone");
+    map.put("Chuck", "Norris");
+    map.put("Array", new float[] {1, 2, 3});
+    byte[] data = pickler.dumps(map);
+    log.debug(String.format("Pickle took %d bytes", data.length));
+    Object back = unpickler.loads(data);
+    assertTrue(back instanceof Map);
+    Map map_back = (Map) back;
+    assertEquals(map_back.get("Bruce"), "Willis");
+    assertTrue(map_back.get("Array") instanceof float[]);
+    float[] arr = (float[]) map_back.get("Array");
+    assertSame(arr.length, 3);
+    assertTrue((arr[1] - 2) * (arr[1] - 2) < 0.000001);
   }
 
   public void testChecksum() throws IOException {
