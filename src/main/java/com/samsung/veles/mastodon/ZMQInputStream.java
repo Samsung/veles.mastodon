@@ -6,7 +6,10 @@ import java.io.InputStream;
 import org.zeromq.ZMQ;
 
 public class ZMQInputStream extends InputStream {
-private final ZMQ.Socket _socket;
+  private final ZMQ.Socket _socket;
+  private byte[] _unread;
+  private int _unread_pos = 0;
+  private boolean _new_message = true;
 
   public ZMQInputStream(ZMQ.Socket socket) {
     _socket = socket;
@@ -14,7 +17,7 @@ private final ZMQ.Socket _socket;
 
   @Override
   public int read() throws IOException {
-    byte[] buf = new byte[] { 0 };
+    byte[] buf = new byte[] {0};
     int res = read(buf);
     if (res == -1) {
       return -1;
@@ -29,14 +32,38 @@ private final ZMQ.Socket _socket;
 
   @Override
   public int read(byte[] b, int off, int len) {
-    if (!_socket.hasReceiveMore()) {
-      // current message is not a multi-part
-      //TODO(seninds): add complex logic to receive multi-part message
-      return _socket.recv(b, off, len, 0);
-    } else {
-      // current message is a multi-part
-      return _socket.recv(b, off, len, 0);
+    int pos = off;
+    int pending = len;
+
+    if (_unread != null) {
+      int read = Math.min(_unread.length - _unread_pos, len);
+      System.arraycopy(_unread, _unread_pos, b, pos, read);
+      _unread_pos += read;
+      boolean more = _unread_pos < _unread.length;
+      if (!more) {
+        _unread_pos = 0;
+        _unread = null;
+      }
+      if (more || _new_message) {
+        return read;
+      }
+      pos += read;
+      pending -= read;
     }
+
+    while (_new_message || _socket.hasReceiveMore()) {
+      Object readobj = _socket.recv_rem(b, pos, pending, 0);
+      _new_message = !_socket.hasReceiveMore();
+      if (readobj instanceof byte[]) {
+        _unread = (byte[]) readobj;
+        return len;
+      }
+      int read = (int) readobj;
+      pos += read;
+      pending -= read;
+    }
+
+    return len - pending;
   }
 
   @Override
@@ -46,18 +73,11 @@ private final ZMQ.Socket _socket;
 
   @Override
   public int available() {
-    if (!_socket.hasReceiveMore()) {
-      return 0;
-    }
-    return 4;
+    return _unread != null ? _unread.length - _unread_pos : 0;
   }
 
   @Override
   public boolean markSupported() {
     return false;
-  }
-
-  public byte[] readMsgPart() {
-    return _socket.recv();
   }
 }

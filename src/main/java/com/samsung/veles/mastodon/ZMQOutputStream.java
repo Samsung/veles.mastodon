@@ -6,35 +6,42 @@ import java.io.OutputStream;
 import org.zeromq.ZMQ;
 
 public class ZMQOutputStream extends OutputStream {
-  private ZMQ.Socket _socket;
-  
-  public ZMQOutputStream(ZMQ.Socket socket) {
+  private static final byte PICKLE_END[] = {'v', 'p', 'e'};
+  private final ZMQ.Socket _socket;
+  private final byte[] _identity;
+
+  public ZMQOutputStream(ZMQ.Socket socket, byte[] identity) {
     _socket = socket;
+    _identity = identity;
+    assert (_identity != null) : "The ZeroMQ socket identity can not be null";
   }
 
   @Override
   public void write(int b) throws IOException {
-    byte[] msg = new byte[] { (byte)b };
+    byte[] msg = new byte[] {(byte) b};
     write(msg, 0, 1);
   }
-  
+
   @Override
   public void write(byte[] b) {
-    write(b, 0, b.length);   
+    write(b, 0, b.length);
   }
-  
+
   @Override
   public void write(byte[] b, int off, int len) {
-    _socket.send(b, off, len, ZMQ.NOBLOCK | ZMQ.SNDMORE);    
+    _socket.send(b, off, len, ZMQ.NOBLOCK | ZMQ.SNDMORE);
   }
-  
+
   @Override
   public void close() {
     _socket.close();
   }
-  
+
   public void finish() {
-    byte[] end_marker = new byte[] { 0 };
-    _socket.send(end_marker, 0);
+    _socket.send(PICKLE_END, ZMQ.NOBLOCK);
+  }
+
+  public void start() {
+    write(_identity);
   }
 }

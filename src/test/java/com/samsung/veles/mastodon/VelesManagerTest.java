@@ -8,6 +8,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -91,28 +92,61 @@ public class VelesManagerTest extends TestCase {
     assertEquals(goldEndpoint, list.get(2));
   }
 
+  public String getUniqueFileName(String part) throws IOException {
+    File f = File.createTempFile("mastodon-test-", "-".concat(part));
+    String filename = f.getName();
+    f.delete();
+    return filename;
+  }
+
   public class Receiver implements Runnable {
     private final ZMQInputStream _in;
+    private int _length;
     private byte[] _data;
+    private byte[] _end;
 
-    public Receiver(ZMQInputStream in) {
+    public Receiver(ZMQInputStream in, int buffer_size) throws NoSuchFieldException,
+        SecurityException, IllegalArgumentException, IllegalAccessException {
       _in = in;
+      _length = 0;
+      _data = new byte[buffer_size];
+      Field field = ZMQOutputStream.class.getDeclaredField("PICKLE_END");
+      field.setAccessible(true);
+      _end = (byte[]) field.get(ZMQOutputStream.class);
     }
 
-    public byte[] data() { return _data; }
+    public byte[] data() {
+      return Arrays.copyOfRange(_data, 0, _length);
+    }
+
+    private boolean isEnded() {
+      for (int i = 1; i <= _end.length; i++) {
+        if (_data[_length - i] != _end[_end.length - i]) {
+          return false;
+        }
+      }
+      return true;
+    }
 
     @Override
     public void run() {
       log.debug("server starts receiving...");
-      _data = _in.readMsgPart();
-      log.debug("done!");
+      int buf_size = 4;
+      int read = buf_size;
+      do {
+        read = _in.read(_data, _length, buf_size);
+        _length += read;
+      } while (!isEnded());
+      _length -= _end.length;
+      log.debug("done, retcode ".concat(Integer.toString(_length)));
     }
   }
 
   public void testOpenStreams() throws InterruptedException, IllegalArgumentException,
       IllegalAccessException, NoSuchFieldException, SecurityException, NoSuchMethodException,
-      InvocationTargetException {
-    ZmqEndpoint endpoint = new ZmqEndpoint("seninu64", "ipc", "ipc://open-streams.ipc");
+      InvocationTargetException, IOException {
+    ZmqEndpoint endpoint =
+        new ZmqEndpoint("localhost", "ipc", "ipc://".concat(getUniqueFileName("open-streams.ipc")));
 
     ZMQ.Context context = ZMQ.context(1);
     ZMQ.Socket socket = context.socket(ZMQ.ROUTER);
@@ -121,26 +155,37 @@ public class VelesManagerTest extends TestCase {
     Field field = VelesManager.class.getDeclaredField("_currentEndpoint");
     field.setAccessible(true);
     field.set(VelesManager.instance(), endpoint);
+
     Method method = VelesManager.class.getDeclaredMethod("openStreams");
     method.setAccessible(true);
     method.invoke(VelesManager.instance());
+
     field = VelesManager.class.getDeclaredField("_in");
     field.setAccessible(true);
-
     ZMQInputStream in = (ZMQInputStream) field.get(VelesManager.instance());
-    Receiver receiver = new Receiver(in);
+    Receiver receiver = new Receiver(in, 128);
+
+    field = VelesManager.class.getDeclaredField("_out");
+    field.setAccessible(true);
+    ZMQOutputStream out = (ZMQOutputStream) field.get(VelesManager.instance());
+    field = ZMQOutputStream.class.getDeclaredField("_socket");
+    field.setAccessible(true);
+    field.set(out, socket);
+
+    String testMsg[] = {"test data", "a bit more data"};
+
     Thread t = new Thread(receiver);
     t.start();
-
-    String testMsg = "test data";
-    log.debug(String.format("sending data: %s", testMsg));
-    socket.send("Mastodon".getBytes(), ZMQ.SNDMORE);
-    socket.send(testMsg.getBytes(), 0);
+    log.debug(String.format("sending data: \"%s\" + \"%s\"", testMsg[0], testMsg[1]));
+    out.start();
+    out.write(testMsg[0].getBytes());
+    out.write(testMsg[1].getBytes());
+    out.finish();
     t.join();
 
     String recvMsg = new String(receiver.data());
-    log.debug(String.format("received data: (%d)", recvMsg.length()));
-    assertEquals(testMsg, new String(receiver.data()));
+    log.debug(String.format("received %d bytes: %s", recvMsg.length(), recvMsg));
+    assertEquals(testMsg[0].concat(testMsg[1]), recvMsg);
   }
 
   public void testChecksum() throws IOException {

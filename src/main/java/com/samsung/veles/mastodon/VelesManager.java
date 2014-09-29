@@ -42,7 +42,7 @@ import com.alibaba.fastjson.JSONObject;
  *
  */
 public class VelesManager {
-
+  private static final byte[] IDENTITY = {'M', 'a', 's', 't', 'o', 'd', 'o', 'n'};
   static Logger log = Logger.getLogger(VelesManager.class.getName());
 
   public enum Compression {
@@ -71,14 +71,16 @@ public class VelesManager {
 
     @Override
     public boolean equals(Object other) {
-      if (other == null) return false;
-      if (other == this) return true;
-      if (!(other instanceof ZmqEndpoint)) return false;
+      if (other == null)
+        return false;
+      if (other == this)
+        return true;
+      if (!(other instanceof ZmqEndpoint))
+        return false;
 
-      ZmqEndpoint endpoint = (ZmqEndpoint)other;
-      if (this.host.equals(endpoint.host) &&
-          this.uri.equals(endpoint.uri) &&
-          this.type.equals(endpoint.type)) {
+      ZmqEndpoint endpoint = (ZmqEndpoint) other;
+      if (this.host.equals(endpoint.host) && this.uri.equals(endpoint.uri)
+          && this.type.equals(endpoint.type)) {
         return true;
       } else {
         return false;
@@ -91,14 +93,13 @@ public class VelesManager {
   }
 
   /**
-   * Calculates the checksum of the file with Veles model. It can be passed in
-   * to {@link #connect(String, int, String) connect()} as workflowId.
+   * Calculates the checksum of the file with Veles model. It can be passed in to
+   * {@link #connect(String, int, String) connect()} as workflowId.
    *
    * @return String with SHA1 file hash.
    * @throws NoSuchAlgorithmException, IOException
    */
-  public static String checksum(String fileName)
-      throws NoSuchAlgorithmException, IOException {
+  public static String checksum(String fileName) throws NoSuchAlgorithmException, IOException {
     FileInputStream fis = new FileInputStream(fileName);
     BufferedInputStream bis = new BufferedInputStream(fis);
     MessageDigest sha1 = MessageDigest.getInstance("SHA1");
@@ -114,7 +115,7 @@ public class VelesManager {
 
     Formatter formatter = new Formatter();
     for (byte b : hash) {
-        formatter.format("%02x", b);
+      formatter.format("%02x", b);
     }
     String result = formatter.toString();
     formatter.close();
@@ -129,8 +130,8 @@ public class VelesManager {
       new TreeMap<String, List<ZmqEndpoint>>();
   private ZmqEndpoint _currentEndpoint;
 
-  public void connect(String host, int port, String workflowId)
-      throws UnknownHostException, IOException {
+  public void connect(String host, int port, String workflowId) throws UnknownHostException,
+      IOException {
     synchronized (this) {
       _host = host;
       _port = port;
@@ -194,8 +195,7 @@ public class VelesManager {
    * @param response Master node response (JSON).
    * @throws UnknownHostException
    */
-  private void updateZmqEndpoints(final byte[] response)
-      throws UnknownHostException {
+  private void updateZmqEndpoints(final byte[] response) throws UnknownHostException {
     // Parse the response - JSON bytes
     JSONObject parsed = (JSONObject) JSON.parse(response);
     _endpoints.clear();
@@ -208,8 +208,7 @@ public class VelesManager {
       for (Object item : data) {
         if (item == null)
           continue;
-        raw_endpoints = (JSONObject) ((JSONObject) item).get(
-            "ZmqLoaderEndpoints");
+        raw_endpoints = (JSONObject) ((JSONObject) item).get("ZmqLoaderEndpoints");
         break;
       }
       // Iterate over endpoint types: tcp, ipc, etc.
@@ -235,7 +234,7 @@ public class VelesManager {
     socket.setIdentity("Mastodon".getBytes());
     socket.connect(_currentEndpoint.uri);
     _in = new ZMQInputStream(socket);
-    _out = new ZMQOutputStream(socket);
+    _out = new ZMQOutputStream(socket, IDENTITY);
   }
 
   public interface Metrics {
@@ -250,15 +249,13 @@ public class VelesManager {
   }
 
   /**
-   * Choose nearest ZeroMQ endpoint to current local host using specified
-   * metrics.
+   * Choose nearest ZeroMQ endpoint to current local host using specified metrics.
    *
    * @param metrics Functor to measure distance between two hosts.
    * @return Nearest ZeroMQ endpoint to the current local host.
    * @throws UnknownHostException
    */
-  private void chooseZmqEndpoint(Metrics metrics)
-      throws UnknownHostException {
+  private void chooseZmqEndpoint(Metrics metrics) throws UnknownHostException {
     java.net.InetAddress localHost = java.net.InetAddress.getLocalHost();
     String curHostName = localHost.getHostName();
     Map<Float, List<ZmqEndpoint>> dist = new TreeMap<Float, List<ZmqEndpoint>>();
@@ -301,22 +298,30 @@ public class VelesManager {
     return execute(job, Compression.Snappy);
   }
 
-  public Object execute(Object job, Compression compression)
-      throws PickleException, IOException {
+  /**
+   * Execute the VELES model synchronously, in a blocking manner.
+   * 
+   * @param job The task to send to the remote side.
+   * @param compression The data compression algorithm to use.
+   * @return The resulting object of the task.
+   * @throws PickleException
+   * @throws IOException
+   */
+  public Object execute(Object job, Compression compression) throws PickleException, IOException {
     Object res = null;
     synchronized (this) {
+      _out.start(); // send the identity
       _pickler.dump(job, getCompressedStream(_out, compression));
-      _out.finish();
+      _out.finish(); // mark the end of the current pickle
       res = _unpickler.load(getUncompressedStream(_in));
     }
     return res;
   }
 
   private static final byte PICKLE_BEGIN[] = {'v', 'p', 'b'};
-  private static final byte PICKLE_END[] = {'v', 'p', 'e'};
 
-  private static OutputStream getCompressedStream(
-      OutputStream output, Compression compression) throws IOException {
+  private static OutputStream getCompressedStream(OutputStream output, Compression compression)
+      throws IOException {
     byte mark[] = new byte[PICKLE_BEGIN.length + 1];
     System.arraycopy(PICKLE_BEGIN, 0, mark, 0, PICKLE_BEGIN.length);
     mark[mark.length - 1] = (byte) compression.ordinal();
@@ -335,12 +340,11 @@ public class VelesManager {
     }
   }
 
-  private static InputStream getUncompressedStream(InputStream input)
-      throws IOException {
-    byte[] mark = new byte[PICKLE_END.length + 1];
+  private static InputStream getUncompressedStream(InputStream input) throws IOException {
+    byte[] mark = new byte[PICKLE_BEGIN.length + 1];
     input.read(mark);
-    for (int i = 0; i < PICKLE_END.length; i++) {
-      if (mark[i] != PICKLE_END[i]) {
+    for (int i = 0; i < PICKLE_BEGIN.length; i++) {
+      if (mark[i] != PICKLE_BEGIN[i]) {
         throw new IOException("Invalid stream format");
       }
     }
