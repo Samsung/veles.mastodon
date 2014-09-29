@@ -1,7 +1,11 @@
 package com.samsung.veles.mastodon;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Field;
@@ -96,6 +100,21 @@ public class VelesManagerTest extends TestCase {
     goldEndpoint.type = "inproc";
     goldEndpoint.uri = "inproc://veles-zmqloader-ZeroMQLoader";
     assertEquals(goldEndpoint, list.get(2));
+  }
+
+  public void testChecksum() throws IOException {
+    File tmp = File.createTempFile("mastodon-test-", ".txt");
+    PrintWriter writer = new PrintWriter(tmp.getAbsolutePath(), "ASCII");
+    writer.println("test text to check VelesManager.checksum()");
+    writer.close();
+    String cs = null;
+    try {
+      cs = VelesManager.checksum(tmp.getAbsolutePath());
+    } catch (NoSuchAlgorithmException e) {
+      fail(e.getMessage());
+    }
+    tmp.delete();
+    assertEquals("2fbb51403bc48c145de6febf39193e42c34ef846", cs);
   }
 
   public String getUniqueFileName(String part) throws IOException {
@@ -195,9 +214,7 @@ public class VelesManagerTest extends TestCase {
     new File(endpoint.uri.substring(6)).delete();
   }
 
-  public void testPickling() throws PickleException, IOException {
-    Pickler pickler = new Pickler();
-    Unpickler unpickler = new Unpickler();
+  private Object getTestObject() {
     TreeMap<String, Object> map = new TreeMap<>();
     map.put("Bruce", "Willis");
     map.put("Arnold", "Schwarzenegger");
@@ -205,9 +222,10 @@ public class VelesManagerTest extends TestCase {
     map.put("Sylvester", "Stallone");
     map.put("Chuck", "Norris");
     map.put("Array", new float[] {1, 2, 3});
-    byte[] data = pickler.dumps(map);
-    log.debug(String.format("Pickle took %d bytes", data.length));
-    Object back = unpickler.loads(data);
+    return map;
+  }
+
+  private void validateTestObject(Object back) {
     assertTrue(back instanceof Map);
     Map map_back = (Map) back;
     assertEquals(map_back.get("Bruce"), "Willis");
@@ -217,18 +235,45 @@ public class VelesManagerTest extends TestCase {
     assertTrue((arr[1] - 2) * (arr[1] - 2) < 0.000001);
   }
 
-  public void testChecksum() throws IOException {
-    File tmp = File.createTempFile("mastodon-test-", ".txt");
-    PrintWriter writer = new PrintWriter(tmp.getAbsolutePath(), "ASCII");
-    writer.println("test text to check VelesManager.checksum()");
-    writer.close();
-    String cs = null;
-    try {
-      cs = VelesManager.checksum(tmp.getAbsolutePath());
-    } catch (NoSuchAlgorithmException e) {
-      fail(e.getMessage());
+  public void testPickling() throws PickleException, IOException {
+    Pickler pickler = new Pickler();
+    Unpickler unpickler = new Unpickler();
+    Object map = getTestObject();
+    byte[] data = pickler.dumps(map);
+    log.debug(String.format("Pickle took %d bytes", data.length));
+    Object back = unpickler.loads(data);
+    validateTestObject(back);
+  }
+
+  public void testExecutePickling() throws PickleException, IllegalAccessException,
+      IllegalArgumentException, InvocationTargetException, IOException, NoSuchMethodException,
+      SecurityException {
+    Method getCompressedStream =
+        VelesManager.class.getDeclaredMethod("getCompressedStream", OutputStream.class,
+            VelesManager.Compression.class);
+    getCompressedStream.setAccessible(true);
+    Method getUncompressedStream =
+        VelesManager.class.getDeclaredMethod("getUncompressedStream", InputStream.class);
+    getUncompressedStream.setAccessible(true);
+    Method closeCompressedStream =
+        VelesManager.class.getDeclaredMethod("closeCompressedStream", OutputStream.class);
+    closeCompressedStream.setAccessible(true);
+
+    Pickler pickler = new Pickler();
+    Unpickler unpickler = new Unpickler();
+    Object job = getTestObject();
+
+    for (VelesManager.Compression codec : VelesManager.Compression.values()) {
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      OutputStream compressed_out = (OutputStream) getCompressedStream.invoke(null, out, codec);
+      pickler.dump(job, compressed_out);
+      closeCompressedStream.invoke(null, compressed_out);
+      out.write(new byte[] {'v', 'p', 'e'});
+      byte[] ser = out.toByteArray();
+      log.debug(String.format("Codec %s yielded %d bytes", codec.name(), ser.length));
+      ByteArrayInputStream in = new ByteArrayInputStream(ser);
+      Object res = unpickler.load((InputStream) getUncompressedStream.invoke(null, in));
+      validateTestObject(res);
     }
-    tmp.delete();
-    assertEquals("2fbb51403bc48c145de6febf39193e42c34ef846", cs);
   }
 }

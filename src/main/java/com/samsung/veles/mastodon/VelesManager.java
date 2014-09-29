@@ -311,7 +311,9 @@ public class VelesManager {
     Object res = null;
     synchronized (this) {
       _out.start(); // send the identity
-      _pickler.dump(job, getCompressedStream(_out, compression));
+      OutputStream compressed_out = getCompressedStream(_out, compression);
+      _pickler.dump(job, compressed_out);
+      closeCompressedStream(compressed_out);
       _out.finish(); // mark the end of the current pickle
       res = _unpickler.load(getUncompressedStream(_in));
     }
@@ -338,6 +340,13 @@ public class VelesManager {
       default:
         throw new UnsupportedOperationException();
     }
+  }
+
+  private static void closeCompressedStream(OutputStream out) throws IOException {
+    if (out instanceof GZIPOutputStream) {
+      ((GZIPOutputStream) out).finish();
+    }
+    out.flush();
   }
 
   private static InputStream getUncompressedStream(InputStream input) throws IOException {
