@@ -192,6 +192,7 @@ public class VelesManagerTest extends TestCase {
     String recvMsg = new String(receiver.data());
     log.debug(String.format("received %d bytes: %s", recvMsg.length(), recvMsg));
     assertEquals(testMsg[0].concat(testMsg[1]), recvMsg);
+    new File(endpoint.uri.substring(6)).delete();
   }
 
   public void testPickling() throws PickleException, IOException {
