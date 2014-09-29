@@ -234,8 +234,8 @@ public class VelesManager {
     ZMQ.Socket socket = _context.socket(ZMQ.DEALER);
     socket.setIdentity("Mastodon".getBytes());
     socket.connect(_currentEndpoint.uri);
-    _in = new ZeroMQInputStream(socket);
-    _out = new ZeroMQOutputStream(socket);
+    _in = new ZMQInputStream(socket);
+    _out = new ZMQOutputStream(socket);
   }
 
   public interface Metrics {
@@ -294,8 +294,8 @@ public class VelesManager {
   private Pickler _pickler;
   private Unpickler _unpickler;
   private final ZMQ.Context _context = ZMQ.context(1);
-  private ZeroMQOutputStream _out;
-  private ZeroMQInputStream _in;
+  private ZMQOutputStream _out;
+  private ZMQInputStream _in;
 
   public Object execute(Object job) throws PickleException, IOException {
     return execute(job, Compression.Snappy);

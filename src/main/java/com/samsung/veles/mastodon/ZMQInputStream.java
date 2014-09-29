@@ -5,10 +5,10 @@ import java.io.InputStream;
 
 import org.zeromq.ZMQ;
 
-public class ZeroMQInputStream extends InputStream {
+public class ZMQInputStream extends InputStream {
 private final ZMQ.Socket _socket;
 
-  public ZeroMQInputStream(ZMQ.Socket socket) {
+  public ZMQInputStream(ZMQ.Socket socket) {
     _socket = socket;
   }
 

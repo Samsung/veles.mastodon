@@ -92,10 +92,10 @@ public class VelesManagerTest extends TestCase {
   }
 
   public class Receiver implements Runnable {
-    private final ZeroMQInputStream _in;
+    private final ZMQInputStream _in;
     private byte[] _data;
 
-    public Receiver(ZeroMQInputStream in) {
+    public Receiver(ZMQInputStream in) {
       _in = in;
     }
 
@@ -127,7 +127,7 @@ public class VelesManagerTest extends TestCase {
     field = VelesManager.class.getDeclaredField("_in");
     field.setAccessible(true);
 
-    ZeroMQInputStream in = (ZeroMQInputStream) field.get(VelesManager.instance());
+    ZMQInputStream in = (ZMQInputStream) field.get(VelesManager.instance());
     Receiver receiver = new Receiver(in);
     Thread t = new Thread(receiver);
     t.start();
