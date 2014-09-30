@@ -140,6 +140,8 @@ public class VelesManagerTest extends TestCase {
       byte[] repTmp = out.recv();
       assertTrue(Arrays.equals(rep, repTmp));
     }
+    in.close();
+    out.close();
   }
 
   public String getUniqueFileName(String part) throws IOException {
@@ -256,6 +258,7 @@ public class VelesManagerTest extends TestCase {
     in.read(buffer);
     assertEquals(testMsg[1], new String(buffer).substring(0, testMsg[1].length()));
 
+    socket.close();
     new File(endpoint.uri.substring(6)).delete();
   }
 
@@ -326,6 +329,10 @@ public class VelesManagerTest extends TestCase {
       _socket.bind(endpoint.uri);
     }
 
+    public void dispose() {
+      _socket.close();
+    }
+
     @Override
     public void run() {
       log.debug("working");
@@ -376,6 +383,7 @@ public class VelesManagerTest extends TestCase {
     Object response = VelesManager.instance().execute(job);
     validateTestObject(response);
     t.join();
+    server.dispose();
     new File(endpoint.uri.substring(6)).delete();
   }
 }

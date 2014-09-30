@@ -57,10 +57,12 @@ public class VelesManager {
       synchronized (VelesManager.class) {
         if (_instance == null) {
           _instance = new VelesManager();
-          /*
-           * Runtime.getRuntime().addShutdownHook(new Thread() { public void run() {
-           * _instance._context.term(); } });
-           */
+          Runtime.getRuntime().addShutdownHook(new Thread() {
+            public void run() {
+              _instance._socket.close();
+              _instance._context.term();
+            }
+          });
         }
       }
     }
