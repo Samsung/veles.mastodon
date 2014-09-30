@@ -51,7 +51,7 @@ public class ZMQInputStream extends InputStream {
       pending -= read;
     }
 
-    while (_new_message || _socket.hasReceiveMore()) {
+    do {
       Object readobj = _socket.recv_rem(b, pos, pending, 0);
       _new_message = !_socket.hasReceiveMore();
       if (readobj instanceof byte[]) {
@@ -61,14 +61,19 @@ public class ZMQInputStream extends InputStream {
       int read = (int) readobj;
       pos += read;
       pending -= read;
-    }
+    } while (!_new_message);
 
     return len - pending;
   }
 
   @Override
   public void close() {
-    _socket.close();
+    _unread_pos = 0;
+    _unread = null;
+    byte[] tmp = new byte[0];
+    while (_socket.hasReceiveMore()) {
+      _socket.recv(tmp, 0, 0, 0);
+    }
   }
 
   @Override

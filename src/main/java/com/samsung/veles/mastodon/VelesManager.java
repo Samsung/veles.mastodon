@@ -1,6 +1,7 @@
 package com.samsung.veles.mastodon;
 
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,7 +43,7 @@ import com.alibaba.fastjson.JSONObject;
  *
  */
 public class VelesManager {
-  private static final byte[] IDENTITY = {'M', 'a', 's', 't', 'o', 'd', 'o', 'n'};
+  private static final int COMPRESSION_BUFFER_SIZE = 128 * 1024;
   static Logger log = Logger.getLogger(VelesManager.class.getName());
 
   public enum Compression {
@@ -56,6 +57,10 @@ public class VelesManager {
       synchronized (VelesManager.class) {
         if (_instance == null) {
           _instance = new VelesManager();
+          /*
+           * Runtime.getRuntime().addShutdownHook(new Thread() { public void run() {
+           * _instance._context.term(); } });
+           */
         }
       }
     }
@@ -227,14 +232,18 @@ public class VelesManager {
 
   /**
    * Creates a new ZeroMQ DEALER socket, reassigns input and output streams.
-   *
+   * 
+   * openStreams() invalidates getFD() result.
    */
   private void openStreams() {
-    ZMQ.Socket socket = _context.socket(ZMQ.DEALER);
-    socket.setIdentity("Mastodon".getBytes());
-    socket.connect(_currentEndpoint.uri);
-    _in = new ZMQInputStream(socket);
-    _out = new ZMQOutputStream(socket, IDENTITY);
+    if (_socket != null) {
+      _socket.close();
+    }
+    _socket = _context.socket(ZMQ.DEALER);
+    _socket.connect(_currentEndpoint.uri);
+    _in = new ZMQInputStream(_socket);
+    // No need to dispose _out - the socket's been already closed in _in.dispose()
+    _out = new ZMQOutputStream(_socket);
   }
 
   public interface Metrics {
@@ -288,18 +297,77 @@ public class VelesManager {
     return _port;
   }
 
-  private Pickler _pickler;
-  private Unpickler _unpickler;
+  private final Pickler _pickler = new Pickler();
+  private final Unpickler _unpickler = new Unpickler();
   private final ZMQ.Context _context = ZMQ.context(1);
-  private ZMQOutputStream _out;
-  private ZMQInputStream _in;
+  private ZMQ.Socket _socket;
+  private OutputStream _out;
+  private InputStream _in;
 
+  public long getFD() {
+    return _socket.getFD();
+  }
+
+  /**
+   * Send a new task to be processed by the VELES side, asynchronously. Get the result with yield().
+   * The default compression method (Snappy) is used.
+   * 
+   * @param job The VELES task.
+   * @throws PickleException
+   * @throws IOException
+   */
+  public void submit(Object job) throws PickleException, IOException {
+    submit(job, Compression.Snappy);
+  }
+
+  /**
+   * Send a new task to be processed by the VELES side, asynchronously. Get the result with yield().
+   * 
+   * @param job The VELES task.
+   * @param compression The compression to use during the submission.
+   * @throws PickleException
+   * @throws IOException
+   */
+  public void submit(Object job, Compression compression) throws PickleException, IOException {
+    synchronized (this) {
+      OutputStream compressed_out = getCompressedStream(_out, compression);
+      _pickler.dump(job, compressed_out);
+      compressed_out.close();
+    }
+  }
+
+  /**
+   * Block until the result of the task previously sent with submit() is received and return it.
+   * 
+   * @return The result of the VELES processing.
+   * @throws PickleException
+   * @throws IOException
+   */
+  public Object yield() throws PickleException, IOException {
+    Object res;
+    synchronized (this) {
+      InputStream uncompressed_in = getUncompressedStream(_in);
+      res = _unpickler.load(uncompressed_in);
+      uncompressed_in.close();
+    }
+    return res;
+  }
+
+  /**
+   * Execute the VELES side task synchronously, in a blocking manner. The default compression method
+   * (Snappy) is used.
+   * 
+   * @param job The task to send to the remote side.
+   * @return The resulting object of the task.
+   * @throws PickleException
+   * @throws IOException
+   */
   public Object execute(Object job) throws PickleException, IOException {
     return execute(job, Compression.Snappy);
   }
 
   /**
-   * Execute the VELES model synchronously, in a blocking manner.
+   * Execute the VELES side task synchronously, in a blocking manner.
    * 
    * @param job The task to send to the remote side.
    * @param compression The data compression algorithm to use.
@@ -308,19 +376,26 @@ public class VelesManager {
    * @throws IOException
    */
   public Object execute(Object job, Compression compression) throws PickleException, IOException {
-    Object res = null;
-    synchronized (this) {
-      _out.start(); // send the identity
-      OutputStream compressed_out = getCompressedStream(_out, compression);
-      _pickler.dump(job, compressed_out);
-      closeCompressedStream(compressed_out);
-      _out.finish(); // mark the end of the current pickle
-      res = _unpickler.load(getUncompressedStream(_in));
-    }
-    return res;
+    submit(job, compression);
+    return yield();
   }
 
   private static final byte PICKLE_BEGIN[] = {'v', 'p', 'b'};
+
+  private static class UnflushableBufferedOutputStream extends BufferedOutputStream {
+    public UnflushableBufferedOutputStream(OutputStream out, int size) {
+      super(out, size);
+    }
+
+    @Override
+    public void flush() {}
+
+    @Override
+    public void close() throws IOException {
+      super.flush();
+      super.close();
+    }
+  }
 
   private static OutputStream getCompressedStream(OutputStream output, Compression compression)
       throws IOException {
@@ -332,21 +407,16 @@ public class VelesManager {
       case None:
         return output;
       case Gzip:
-        return new GZIPOutputStream(output);
+        return new GZIPOutputStream(output, COMPRESSION_BUFFER_SIZE);
       case Snappy:
-        return new SnappyOutputStream(output);
+        return new UnflushableBufferedOutputStream(new SnappyOutputStream(output),
+            COMPRESSION_BUFFER_SIZE);
       case Lzma2:
-        return new XZOutputStream(output, new LZMA2Options());
+        return new UnflushableBufferedOutputStream(new XZOutputStream(output, new LZMA2Options()),
+            COMPRESSION_BUFFER_SIZE);
       default:
         throw new UnsupportedOperationException();
     }
-  }
-
-  private static void closeCompressedStream(OutputStream out) throws IOException {
-    if (out instanceof GZIPOutputStream) {
-      ((GZIPOutputStream) out).finish();
-    }
-    out.flush();
   }
 
   private static InputStream getUncompressedStream(InputStream input) throws IOException {

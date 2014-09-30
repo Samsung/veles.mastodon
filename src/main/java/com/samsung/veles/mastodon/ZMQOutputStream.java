@@ -8,12 +8,9 @@ import org.zeromq.ZMQ;
 public class ZMQOutputStream extends OutputStream {
   private static final byte PICKLE_END[] = {'v', 'p', 'e'};
   private final ZMQ.Socket _socket;
-  private final byte[] _identity;
 
-  public ZMQOutputStream(ZMQ.Socket socket, byte[] identity) {
+  public ZMQOutputStream(ZMQ.Socket socket) {
     _socket = socket;
-    _identity = identity;
-    assert (_identity != null) : "The ZeroMQ socket identity can not be null";
   }
 
   @Override
@@ -34,14 +31,6 @@ public class ZMQOutputStream extends OutputStream {
 
   @Override
   public void close() {
-    _socket.close();
-  }
-
-  public void finish() {
     _socket.send(PICKLE_END, ZMQ.NOBLOCK);
-  }
-
-  public void start() {
-    write(_identity);
   }
 }

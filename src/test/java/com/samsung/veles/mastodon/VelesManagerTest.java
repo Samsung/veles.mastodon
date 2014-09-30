@@ -4,14 +4,13 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +27,7 @@ import org.apache.log4j.BasicConfigurator;
 import org.apache.log4j.Logger;
 import org.zeromq.ZMQ;
 
+import com.samsung.veles.mastodon.VelesManager.Compression;
 import com.samsung.veles.mastodon.VelesManager.ZmqEndpoint;
 
 /**
@@ -117,6 +117,31 @@ public class VelesManagerTest extends TestCase {
     assertEquals("2fbb51403bc48c145de6febf39193e42c34ef846", cs);
   }
 
+  public void testRouterDealer() {
+    ZMQ.Context context = ZMQ.context(1);
+
+    ZMQ.Socket in = context.socket(ZMQ.ROUTER);
+    in.bind("ipc:///tmp/reqrep");
+
+    ZMQ.Socket out = context.socket(ZMQ.DEALER);
+    out.connect("ipc:///tmp/reqrep");
+
+    for (int i = 0; i < 10; i++) {
+      byte[] req = ("request" + i).getBytes();
+      byte[] rep = ("reply" + i).getBytes();
+
+      assertTrue(out.send(req, ZMQ.NOBLOCK));
+      byte[] reqTmp = in.recv(0);
+      byte[] reqTmp2 = in.recv(0);
+      assertTrue(Arrays.equals(req, reqTmp2));
+
+      in.send(reqTmp, ZMQ.SNDMORE);
+      in.send(rep, 0);
+      byte[] repTmp = out.recv();
+      assertTrue(Arrays.equals(rep, repTmp));
+    }
+  }
+
   public String getUniqueFileName(String part) throws IOException {
     File f = File.createTempFile("mastodon-test-", "-".concat(part));
     String filename = f.getName();
@@ -124,24 +149,28 @@ public class VelesManagerTest extends TestCase {
     return filename;
   }
 
-  public class Receiver implements Runnable {
+  public class Receiver {
     private final ZMQInputStream _in;
+    private final ZMQ.Socket _socket;
     private int _length;
     private byte[] _data;
     private byte[] _end;
+    int _buffer_size = 4;
+    int _capacity;
 
-    public Receiver(ZMQInputStream in, int buffer_size) throws NoSuchFieldException,
+    public Receiver(ZMQ.Socket socket, int capacity) throws NoSuchFieldException,
         SecurityException, IllegalArgumentException, IllegalAccessException {
-      _in = in;
-      _length = 0;
-      _data = new byte[buffer_size];
+      _in = new ZMQInputStream(socket);
+      _socket = socket;
+      _capacity = capacity;
       Field field = ZMQOutputStream.class.getDeclaredField("PICKLE_END");
       field.setAccessible(true);
       _end = (byte[]) field.get(ZMQOutputStream.class);
     }
 
     public byte[] data() {
-      return Arrays.copyOfRange(_data, 0, _length);
+      // The length of the service information equals to 5
+      return Arrays.copyOfRange(_data, 5, _length);
     }
 
     private boolean isEnded() {
@@ -153,17 +182,29 @@ public class VelesManagerTest extends TestCase {
       return true;
     }
 
-    @Override
-    public void run() {
-      log.debug("server starts receiving...");
-      int buf_size = 4;
-      int read = buf_size;
+    int getBufferSize() {
+      return _buffer_size;
+    }
+
+    public void setBufferSize(int value) {
+      _buffer_size = value;
+    }
+
+    public void receive() {
+      int read = _buffer_size;
+      _data = new byte[_capacity];
+      _length = 0;
       do {
-        read = _in.read(_data, _length, buf_size);
+        read = _in.read(_data, _length, _buffer_size);
         _length += read;
       } while (!isEnded());
       _length -= _end.length;
       log.debug("done, retcode ".concat(Integer.toString(_length)));
+    }
+
+    public void reply(byte[] message) {
+      _socket.send(_data, 0, 5, ZMQ.NOBLOCK | ZMQ.SNDMORE);
+      _socket.send(message, ZMQ.NOBLOCK);
     }
   }
 
@@ -172,12 +213,13 @@ public class VelesManagerTest extends TestCase {
       InvocationTargetException, IOException {
     ZmqEndpoint endpoint =
         new ZmqEndpoint("localhost", "ipc", "ipc://".concat(getUniqueFileName("open-streams.ipc")));
-
-    ZMQ.Context context = ZMQ.context(1);
+    Field field = VelesManager.class.getDeclaredField("_context");
+    field.setAccessible(true);
+    ZMQ.Context context = (ZMQ.Context) field.get(VelesManager.instance());
     ZMQ.Socket socket = context.socket(ZMQ.ROUTER);
     socket.bind(endpoint.uri);
 
-    Field field = VelesManager.class.getDeclaredField("_currentEndpoint");
+    field = VelesManager.class.getDeclaredField("_currentEndpoint");
     field.setAccessible(true);
     field.set(VelesManager.instance(), endpoint);
 
@@ -188,29 +230,32 @@ public class VelesManagerTest extends TestCase {
     field = VelesManager.class.getDeclaredField("_in");
     field.setAccessible(true);
     ZMQInputStream in = (ZMQInputStream) field.get(VelesManager.instance());
-    Receiver receiver = new Receiver(in, 128);
+    Receiver receiver = new Receiver(socket, 128);
 
     field = VelesManager.class.getDeclaredField("_out");
     field.setAccessible(true);
     ZMQOutputStream out = (ZMQOutputStream) field.get(VelesManager.instance());
-    field = ZMQOutputStream.class.getDeclaredField("_socket");
-    field.setAccessible(true);
-    field.set(out, socket);
 
     String testMsg[] = {"test data", "a bit more data"};
-
-    Thread t = new Thread(receiver);
-    t.start();
     log.debug(String.format("sending data: \"%s\" + \"%s\"", testMsg[0], testMsg[1]));
-    out.start();
-    out.write(testMsg[0].getBytes());
-    out.write(testMsg[1].getBytes());
-    out.finish();
-    t.join();
+    int[] bufferSizes = new int[] {4, 5, 64};
 
-    String recvMsg = new String(receiver.data());
-    log.debug(String.format("received %d bytes: %s", recvMsg.length(), recvMsg));
-    assertEquals(testMsg[0].concat(testMsg[1]), recvMsg);
+    for (int bufferSize : bufferSizes) {
+      receiver.setBufferSize(bufferSize);
+      log.debug(String.format("trying buffer size %d", bufferSize));
+      out.write(testMsg[0].getBytes());
+      out.write(testMsg[1].getBytes());
+      out.close();
+      receiver.receive();
+      String recvMsg = new String(receiver.data());
+      log.debug(String.format("received %d bytes: %s", recvMsg.length(), recvMsg));
+      assertEquals(testMsg[0].concat(testMsg[1]), recvMsg);
+    }
+    receiver.reply(testMsg[1].getBytes());
+    byte[] buffer = new byte[128];
+    in.read(buffer);
+    assertEquals(testMsg[1], new String(buffer).substring(0, testMsg[1].length()));
+
     new File(endpoint.uri.substring(6)).delete();
   }
 
@@ -247,33 +292,90 @@ public class VelesManagerTest extends TestCase {
 
   public void testExecutePickling() throws PickleException, IllegalAccessException,
       IllegalArgumentException, InvocationTargetException, IOException, NoSuchMethodException,
-      SecurityException {
-    Method getCompressedStream =
-        VelesManager.class.getDeclaredMethod("getCompressedStream", OutputStream.class,
-            VelesManager.Compression.class);
-    getCompressedStream.setAccessible(true);
-    Method getUncompressedStream =
-        VelesManager.class.getDeclaredMethod("getUncompressedStream", InputStream.class);
-    getUncompressedStream.setAccessible(true);
-    Method closeCompressedStream =
-        VelesManager.class.getDeclaredMethod("closeCompressedStream", OutputStream.class);
-    closeCompressedStream.setAccessible(true);
+      SecurityException, NoSuchFieldException {
+    Method submit = VelesManager.class.getDeclaredMethod("submit", Object.class, Compression.class);
+    submit.setAccessible(true);
+    Method yield = VelesManager.class.getDeclaredMethod("yield");
+    yield.setAccessible(true);
+    Field in = VelesManager.class.getDeclaredField("_in");
+    in.setAccessible(true);
+    Field out = VelesManager.class.getDeclaredField("_out");
+    out.setAccessible(true);
 
-    Pickler pickler = new Pickler();
-    Unpickler unpickler = new Unpickler();
+
     Object job = getTestObject();
 
     for (VelesManager.Compression codec : VelesManager.Compression.values()) {
-      ByteArrayOutputStream out = new ByteArrayOutputStream();
-      OutputStream compressed_out = (OutputStream) getCompressedStream.invoke(null, out, codec);
-      pickler.dump(job, compressed_out);
-      closeCompressedStream.invoke(null, compressed_out);
-      out.write(new byte[] {'v', 'p', 'e'});
-      byte[] ser = out.toByteArray();
+      ByteArrayOutputStream fake_out = new ByteArrayOutputStream();
+      out.set(VelesManager.instance(), fake_out);
+      submit.invoke(VelesManager.instance(), job, codec);
+      byte[] ser = fake_out.toByteArray();
       log.debug(String.format("Codec %s yielded %d bytes", codec.name(), ser.length));
-      ByteArrayInputStream in = new ByteArrayInputStream(ser);
-      Object res = unpickler.load((InputStream) getUncompressedStream.invoke(null, in));
+      in.set(VelesManager.instance(), new ByteArrayInputStream(ser));
+      Object res = yield.invoke(VelesManager.instance());
       validateTestObject(res);
     }
+  }
+
+  public class TestServer implements Runnable {
+    private final ZMQ.Socket _socket;
+
+    public TestServer(ZmqEndpoint endpoint) {
+      ZMQ.Context context = ZMQ.context(1);
+      _socket = context.socket(ZMQ.ROUTER);
+      _socket.bind(endpoint.uri);
+    }
+
+    @Override
+    public void run() {
+      log.debug("working");
+      ArrayList<byte[]> incoming = new ArrayList<>();
+      boolean first = true;
+      do {
+        incoming.add(_socket.recv());
+        if (first) {
+          first = false;
+          log.debug("receiving the message parts");
+        }
+      } while (_socket.hasReceiveMore());
+      int overall = 0;
+      for (int i = 1; i < incoming.size(); i++) {
+        overall += incoming.get(i).length;
+      }
+      byte[] merged = new byte[overall];
+      overall = 0;
+      for (int i = 1; i < incoming.size(); i++) {
+        int length = incoming.get(i).length;
+        System.arraycopy(incoming.get(i), 0, merged, overall, length);
+        overall += length;
+      }
+      log.debug(String.format("sending back the same pickle (%d bytes)", overall));
+      _socket.send(incoming.get(0), ZMQ.NOBLOCK | ZMQ.SNDMORE);
+      _socket.send(merged, ZMQ.NOBLOCK);
+    }
+  }
+
+  public void testExecute() throws IOException, NoSuchFieldException, SecurityException,
+      IllegalArgumentException, IllegalAccessException, NoSuchMethodException,
+      InvocationTargetException, InterruptedException {
+    ZmqEndpoint endpoint =
+        new ZmqEndpoint("localhost", "ipc", "ipc://".concat(getUniqueFileName("execute.ipc")));
+    TestServer server = new TestServer(endpoint);
+    Thread t = new Thread(server);
+    t.start();
+
+    Field field = VelesManager.class.getDeclaredField("_currentEndpoint");
+    field.setAccessible(true);
+    field.set(VelesManager.instance(), endpoint);
+
+    Method method = VelesManager.class.getDeclaredMethod("openStreams");
+    method.setAccessible(true);
+    method.invoke(VelesManager.instance());
+
+    Object job = getTestObject();
+    Object response = VelesManager.instance().execute(job);
+    validateTestObject(response);
+    t.join();
+    new File(endpoint.uri.substring(6)).delete();
   }
 }
