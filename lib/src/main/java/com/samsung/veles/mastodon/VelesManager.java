@@ -38,6 +38,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 
+
 /**
  * Connects to Veles workflow's master and submits jobs.
  *
@@ -317,8 +318,9 @@ public class VelesManager {
    * @param job The VELES task.
    * @throws PickleException
    * @throws IOException
+   * @throws UnsupportedObjectException The specified job object is not pickleable.
    */
-  public void submit(Object job) throws PickleException, IOException {
+  public void submit(Object job) throws IOException, UnsupportedObjectException {
     submit(job, Compression.Snappy);
   }
 
@@ -329,11 +331,17 @@ public class VelesManager {
    * @param compression The compression to use during the submission.
    * @throws PickleException
    * @throws IOException
+   * @throws UnsupportedObjectException The specified job object is not pickleable.
    */
-  public void submit(Object job, Compression compression) throws PickleException, IOException {
+  public void submit(Object job, Compression compression) throws IOException,
+      UnsupportedObjectException {
     synchronized (this) {
       OutputStream compressed_out = getCompressedStream(_out, compression);
-      _pickler.dump(job, compressed_out);
+      try {
+        _pickler.dump(job, compressed_out);
+      } catch (PickleException ex) {
+        throw new UnsupportedObjectException();
+      }
       compressed_out.close();
     }
   }
@@ -342,10 +350,9 @@ public class VelesManager {
    * Block until the result of the task previously sent with submit() is received and return it.
    * 
    * @return The result of the VELES processing.
-   * @throws PickleException
    * @throws IOException
    */
-  public Object yield() throws PickleException, IOException {
+  public Object yield() throws IOException {
     Object res;
     synchronized (this) {
       InputStream uncompressed_in = getUncompressedStream(_in);
@@ -363,8 +370,9 @@ public class VelesManager {
    * @return The resulting object of the task.
    * @throws PickleException
    * @throws IOException
+   * @throws UnsupportedObjectException The specified job object is not pickleable.
    */
-  public Object execute(Object job) throws PickleException, IOException {
+  public Object execute(Object job) throws IOException, UnsupportedObjectException {
     return execute(job, Compression.Snappy);
   }
 
@@ -376,8 +384,10 @@ public class VelesManager {
    * @return The resulting object of the task.
    * @throws PickleException
    * @throws IOException
+   * @throws UnsupportedObjectException The specified job object is not pickleable.
    */
-  public Object execute(Object job, Compression compression) throws PickleException, IOException {
+  public Object execute(Object job, Compression compression) throws IOException,
+      UnsupportedObjectException {
     submit(job, compression);
     return yield();
   }

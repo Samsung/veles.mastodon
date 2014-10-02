@@ -4,7 +4,6 @@
 
   <groupId>com.samsung.veles.mastodon.examples</groupId>
   <artifactId>strings</artifactId>
-  <version>0.0.1-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <name>strings</name>
@@ -27,12 +26,18 @@
     </plugins>
   </build>
 
+  <parent>
+    <groupId>com.samsung.veles</groupId>
+    <artifactId>mastodon-all</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
   <dependencies>
     <dependency>
       <groupId>com.samsung.veles</groupId>
       <artifactId>mastodon</artifactId>
       <version>0.0.1-SNAPSHOT</version>
-      <scope>provided</scope>
     </dependency>
   </dependencies>
 </project>

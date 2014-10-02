@@ -2,8 +2,7 @@ package com.samsung.veles.mastodon.examples.strings;
 
 import java.io.IOException;
 
-import net.razorvine.pickle.PickleException;
-
+import com.samsung.veles.mastodon.UnsupportedObjectException;
 import com.samsung.veles.mastodon.VelesManager;
 
 /**
@@ -11,7 +10,7 @@ import com.samsung.veles.mastodon.VelesManager;
  *
  */
 public class App {
-  public static void main(String[] args) throws PickleException, IOException {
+  public static void main(String[] args) throws IOException, UnsupportedObjectException {
     VelesManager.instance().connect(args[1], Integer.parseInt(args[2]), args[3]);
     String job = "";
     while (job.equals("exit")) {

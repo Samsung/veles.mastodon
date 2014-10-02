@@ -1,3 +1,3 @@
 [submodule "Pyrolite"]
-	path = Pyrolite
+	path = lib/Pyrolite
 	url = https://github.com/irmen/Pyrolite
