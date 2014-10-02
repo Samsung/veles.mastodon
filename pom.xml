@@ -8,7 +8,7 @@
   <packaging>jar</packaging>
 
   <name>mastodon</name>
-  <url>http://alserver.rnd.samsung.ru/veles</url>
+  <url>http://alserver.rnd.samsung.ru/veles/mastodon</url>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
