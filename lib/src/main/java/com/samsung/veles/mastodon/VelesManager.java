@@ -60,7 +60,9 @@ public class VelesManager {
           _instance = new VelesManager();
           Runtime.getRuntime().addShutdownHook(new Thread() {
             public void run() {
-              _instance._socket.close();
+              if (_instance._socket != null) {
+                _instance._socket.close();
+              }
               _instance._context.term();
             }
           });
