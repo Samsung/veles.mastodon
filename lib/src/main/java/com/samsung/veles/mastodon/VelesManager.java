@@ -12,6 +12,7 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Formatter;
 import java.util.List;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Random;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -30,8 +32,8 @@ import org.apache.log4j.Logger;
 import org.tukaani.xz.LZMA2Options;
 import org.tukaani.xz.XZInputStream;
 import org.tukaani.xz.XZOutputStream;
-import org.xerial.snappy.SnappyInputStream;
-import org.xerial.snappy.SnappyOutputStream;
+import org.xerial.snappy.SnappyFramedInputStream;
+import org.xerial.snappy.SnappyFramedOutputStream;
 import org.zeromq.ZMQ;
 
 import com.alibaba.fastjson.JSON;
@@ -294,8 +296,8 @@ public class VelesManager {
    * @throws IOException
    * @throws UnsupportedObjectException The specified job object is not pickleable.
    */
-  public void submit(Object job) throws IOException, UnsupportedObjectException {
-    submit(job, Compression.Snappy);
+  public String submit(Object job) throws IOException, UnsupportedObjectException {
+    return submit(job, Compression.Snappy);
   }
 
   /**
@@ -307,10 +309,11 @@ public class VelesManager {
    * @throws IOException
    * @throws UnsupportedObjectException The specified job object is not pickleable.
    */
-  public void submit(Object job, Compression compression) throws IOException,
+  public String submit(Object job, Compression compression) throws IOException,
       UnsupportedObjectException {
+    String id = UUID.randomUUID().toString();
     synchronized (this) {
-      OutputStream compressed_out = getCompressedStream(_out, compression);
+      OutputStream compressed_out = getCompressedStream(_out, compression, id);
       try {
         _pickler.dump(job, compressed_out);
       } catch (PickleException ex) {
@@ -318,18 +321,21 @@ public class VelesManager {
       }
       compressed_out.close();
     }
+    return id;
   }
 
   /**
    * Block until the result of the task previously sent with submit() is received and return it.
    * 
+   * @param id The expected result identifier (obtained from submit()).
    * @return The result of the VELES processing.
    * @throws IOException
+   * @throws JobIdMismatchException
    */
-  public Object yield() throws IOException {
+  public Object yield(String id) throws IOException, JobIdMismatchException {
     Object res;
     synchronized (this) {
-      InputStream uncompressed_in = getUncompressedStream(_in);
+      InputStream uncompressed_in = getUncompressedStream(_in, id);
       res = _unpickler.load(uncompressed_in);
       uncompressed_in.close();
     }
@@ -345,8 +351,10 @@ public class VelesManager {
    * @throws PickleException
    * @throws IOException
    * @throws UnsupportedObjectException The specified job object is not pickleable.
+   * @throws JobIdMismatchException
    */
-  public Object execute(Object job) throws IOException, UnsupportedObjectException {
+  public Object execute(Object job) throws IOException, UnsupportedObjectException,
+      JobIdMismatchException {
     return execute(job, Compression.Snappy);
   }
 
@@ -359,11 +367,12 @@ public class VelesManager {
    * @throws PickleException
    * @throws IOException
    * @throws UnsupportedObjectException The specified job object is not pickleable.
+   * @throws JobIdMismatchException
    */
   public Object execute(Object job, Compression compression) throws IOException,
-      UnsupportedObjectException {
-    submit(job, compression);
-    return yield();
+      UnsupportedObjectException, JobIdMismatchException {
+    String id = submit(job, compression);
+    return yield(id);
   }
 
   private static final byte PICKLE_BEGIN[] = {'v', 'p', 'b'};
@@ -383,8 +392,9 @@ public class VelesManager {
     }
   }
 
-  private static OutputStream getCompressedStream(OutputStream output, Compression compression)
-      throws IOException {
+  private static OutputStream getCompressedStream(OutputStream output, Compression compression,
+      String id) throws IOException {
+    output.write(id.getBytes());
     byte mark[] = new byte[PICKLE_BEGIN.length + 1];
     System.arraycopy(PICKLE_BEGIN, 0, mark, 0, PICKLE_BEGIN.length);
     mark[mark.length - 1] = (byte) compression.ordinal();
@@ -395,7 +405,7 @@ public class VelesManager {
       case Gzip:
         return new GZIPOutputStream(output, COMPRESSION_BUFFER_SIZE);
       case Snappy:
-        return new UnflushableBufferedOutputStream(new SnappyOutputStream(output),
+        return new UnflushableBufferedOutputStream(new SnappyFramedOutputStream(output),
             COMPRESSION_BUFFER_SIZE);
       case Lzma2:
         return new UnflushableBufferedOutputStream(new XZOutputStream(output, new LZMA2Options()),
@@ -405,7 +415,14 @@ public class VelesManager {
     }
   }
 
-  private static InputStream getUncompressedStream(InputStream input) throws IOException {
+  private static InputStream getUncompressedStream(InputStream input, String expectedId)
+      throws IOException, JobIdMismatchException {
+    byte[] msgId = new byte[36];
+    input.read(msgId);
+    if (!Arrays.equals(msgId, expectedId.getBytes())) {
+      throw new JobIdMismatchException();
+    }
+
     byte[] mark = new byte[PICKLE_BEGIN.length + 1];
     input.read(mark);
     for (int i = 0; i < PICKLE_BEGIN.length; i++) {
@@ -420,7 +437,7 @@ public class VelesManager {
       case Gzip:
         return new GZIPInputStream(input);
       case Snappy:
-        return new SnappyInputStream(input);
+        return new SnappyFramedInputStream(input);
       case Lzma2:
         return new XZInputStream(input);
       default:

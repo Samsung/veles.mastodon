@@ -297,7 +297,7 @@ public class VelesManagerTest extends TestCase {
       SecurityException, NoSuchFieldException {
     Method submit = VelesManager.class.getDeclaredMethod("submit", Object.class, Compression.class);
     submit.setAccessible(true);
-    Method yield = VelesManager.class.getDeclaredMethod("yield");
+    Method yield = VelesManager.class.getDeclaredMethod("yield", String.class);
     yield.setAccessible(true);
     Field in = VelesManager.class.getDeclaredField("_in");
     in.setAccessible(true);
@@ -310,11 +310,11 @@ public class VelesManagerTest extends TestCase {
     for (VelesManager.Compression codec : VelesManager.Compression.values()) {
       ByteArrayOutputStream fake_out = new ByteArrayOutputStream();
       out.set(VelesManager.instance(), fake_out);
-      submit.invoke(VelesManager.instance(), job, codec);
+      String id = (String) submit.invoke(VelesManager.instance(), job, codec);
       byte[] ser = fake_out.toByteArray();
       log.debug(String.format("Codec %s yielded %d bytes", codec.name(), ser.length));
       in.set(VelesManager.instance(), new ByteArrayInputStream(ser));
-      Object res = yield.invoke(VelesManager.instance());
+      Object res = yield.invoke(VelesManager.instance(), id);
       validateTestObject(res);
     }
   }
@@ -363,7 +363,8 @@ public class VelesManagerTest extends TestCase {
 
   public void testExecute() throws IOException, NoSuchFieldException, SecurityException,
       IllegalArgumentException, IllegalAccessException, NoSuchMethodException,
-      InvocationTargetException, InterruptedException, UnsupportedObjectException {
+      InvocationTargetException, InterruptedException, UnsupportedObjectException,
+      JobIdMismatchException {
     ZMQEndpoint endpoint =
         new ZMQEndpoint("localhost", "ipc", "ipc://".concat(getUniqueFileName("execute.ipc")));
     TestServer server = new TestServer(endpoint);
