@@ -28,7 +28,6 @@ import org.apache.log4j.Logger;
 import org.zeromq.ZMQ;
 
 import com.samsung.veles.mastodon.VelesManager.Compression;
-import com.samsung.veles.mastodon.VelesManager.ZmqEndpoint;
 
 /**
  * Unit test for VelesManager.
@@ -84,15 +83,15 @@ public class VelesManagerTest extends TestCase {
     field.setAccessible(true);
 
     // check endpoints
-    Map<String, List<ZmqEndpoint>> endpoints =
-        (Map<String, List<ZmqEndpoint>>) field.get(VelesManager.instance());
+    Map<String, List<ZMQEndpoint>> endpoints =
+        (Map<String, List<ZMQEndpoint>>) field.get(VelesManager.instance());
     assertEquals(1, endpoints.size());
     assertTrue(endpoints.containsKey("fd8e0fc6-b015-4245-922d-950dea3ac198"));
-    List<ZmqEndpoint> list = endpoints.get("fd8e0fc6-b015-4245-922d-950dea3ac198");
+    List<ZMQEndpoint> list = endpoints.get("fd8e0fc6-b015-4245-922d-950dea3ac198");
     assertEquals(3, list.size());
 
-    ZmqEndpoint goldEndpoint =
-        new ZmqEndpoint("markovtsevu64", "ipc", "ipc:///tmp/veles-ipc-zmqloader-dnioqryd");
+    ZMQEndpoint goldEndpoint =
+        new ZMQEndpoint("markovtsevu64", "ipc", "ipc:///tmp/veles-ipc-zmqloader-dnioqryd");
     assertEquals(goldEndpoint, list.get(0));
     goldEndpoint.type = "tcp";
     goldEndpoint.uri = "tcp://markovtsevu64:52937";
@@ -213,8 +212,8 @@ public class VelesManagerTest extends TestCase {
   public void testOpenStreams() throws InterruptedException, IllegalArgumentException,
       IllegalAccessException, NoSuchFieldException, SecurityException, NoSuchMethodException,
       InvocationTargetException, IOException {
-    ZmqEndpoint endpoint =
-        new ZmqEndpoint("localhost", "ipc", "ipc://".concat(getUniqueFileName("open-streams.ipc")));
+    ZMQEndpoint endpoint =
+        new ZMQEndpoint("localhost", "ipc", "ipc://".concat(getUniqueFileName("open-streams.ipc")));
     Field field = VelesManager.class.getDeclaredField("_context");
     field.setAccessible(true);
     ZMQ.Context context = (ZMQ.Context) field.get(VelesManager.instance());
@@ -323,7 +322,7 @@ public class VelesManagerTest extends TestCase {
   public class TestServer implements Runnable {
     private final ZMQ.Socket _socket;
 
-    public TestServer(ZmqEndpoint endpoint) {
+    public TestServer(ZMQEndpoint endpoint) {
       ZMQ.Context context = ZMQ.context(1);
       _socket = context.socket(ZMQ.ROUTER);
       _socket.bind(endpoint.uri);
@@ -365,8 +364,8 @@ public class VelesManagerTest extends TestCase {
   public void testExecute() throws IOException, NoSuchFieldException, SecurityException,
       IllegalArgumentException, IllegalAccessException, NoSuchMethodException,
       InvocationTargetException, InterruptedException, UnsupportedObjectException {
-    ZmqEndpoint endpoint =
-        new ZmqEndpoint("localhost", "ipc", "ipc://".concat(getUniqueFileName("execute.ipc")));
+    ZMQEndpoint endpoint =
+        new ZMQEndpoint("localhost", "ipc", "ipc://".concat(getUniqueFileName("execute.ipc")));
     TestServer server = new TestServer(endpoint);
     Thread t = new Thread(server);
     t.start();
