@@ -46,13 +46,6 @@ import com.alibaba.fastjson.JSONObject;
  *
  */
 public class VelesManager {
-  private static final int COMPRESSION_BUFFER_SIZE = 128 * 1024;
-  static Logger log = Logger.getLogger(VelesManager.class.getName());
-
-  public enum Compression {
-    None, Gzip, Snappy, Lzma2
-  }
-
   private static volatile VelesManager _instance = null;
 
   public static VelesManager instance() {
@@ -105,12 +98,27 @@ public class VelesManager {
     return result;
   }
 
+  private static final int COMPRESSION_BUFFER_SIZE = 128 * 1024;
+  private static Logger log = Logger.getLogger(VelesManager.class.getName());
   private String _host;
   private int _port;
   private String _workflowId;
   private final Map<String, List<ZMQEndpoint>> _endpoints =
       new TreeMap<String, List<ZMQEndpoint>>();
   private ZMQEndpoint _currentEndpoint;
+  private int _counter = 0;
+  private int _refresh_interval = 100;
+
+  public int getRefreshInterval() {
+    return _refresh_interval;
+  }
+
+  public void serRefreshInterval(int value) {
+    if (value < 1) {
+      throw new IllegalArgumentException();
+    }
+    _refresh_interval = value;
+  }
 
   public void connect(String host, int port, String workflowId) throws UnknownHostException,
       IOException, NoSlavesExistException {
@@ -266,6 +274,7 @@ public class VelesManager {
     // select the optimal endpoint
     chooseZmqEndpoint(new SameHostMetrics());
     openStreams();
+    _counter = 0;
   }
 
   public String getHost() {
@@ -287,6 +296,10 @@ public class VelesManager {
     return _socket.getFD();
   }
 
+  public enum Compression {
+    None, Gzip, Snappy, Lzma2
+  }
+
   /**
    * Send a new task to be processed by the VELES side, asynchronously. Get the result with yield().
    * The default compression method (Snappy) is used.
@@ -295,8 +308,10 @@ public class VelesManager {
    * @throws PickleException
    * @throws IOException
    * @throws UnsupportedObjectException The specified job object is not pickleable.
+   * @throws NoSlavesExistException
    */
-  public String submit(Object job) throws IOException, UnsupportedObjectException {
+  public String submit(Object job) throws IOException, UnsupportedObjectException,
+      NoSlavesExistException {
     return submit(job, Compression.Snappy);
   }
 
@@ -308,11 +323,15 @@ public class VelesManager {
    * @throws PickleException
    * @throws IOException
    * @throws UnsupportedObjectException The specified job object is not pickleable.
+   * @throws NoSlavesExistException
    */
   public String submit(Object job, Compression compression) throws IOException,
-      UnsupportedObjectException {
+      UnsupportedObjectException, NoSlavesExistException {
     String id = UUID.randomUUID().toString();
     synchronized (this) {
+      if (_counter++ >= _refresh_interval) {
+        refresh();
+      }
       OutputStream compressed_out = getCompressedStream(_out, compression, id);
       try {
         _pickler.dump(job, compressed_out);
@@ -352,9 +371,10 @@ public class VelesManager {
    * @throws IOException
    * @throws UnsupportedObjectException The specified job object is not pickleable.
    * @throws JobIdMismatchException
+   * @throws NoSlavesExistException
    */
   public Object execute(Object job) throws IOException, UnsupportedObjectException,
-      JobIdMismatchException {
+      JobIdMismatchException, NoSlavesExistException {
     return execute(job, Compression.Snappy);
   }
 
@@ -368,9 +388,10 @@ public class VelesManager {
    * @throws IOException
    * @throws UnsupportedObjectException The specified job object is not pickleable.
    * @throws JobIdMismatchException
+   * @throws NoSlavesExistException
    */
   public Object execute(Object job, Compression compression) throws IOException,
-      UnsupportedObjectException, JobIdMismatchException {
+      UnsupportedObjectException, JobIdMismatchException, NoSlavesExistException {
     String id = submit(job, compression);
     return yield(id);
   }

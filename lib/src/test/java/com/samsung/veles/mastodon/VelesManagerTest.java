@@ -364,7 +364,7 @@ public class VelesManagerTest extends TestCase {
   public void testExecute() throws IOException, NoSuchFieldException, SecurityException,
       IllegalArgumentException, IllegalAccessException, NoSuchMethodException,
       InvocationTargetException, InterruptedException, UnsupportedObjectException,
-      JobIdMismatchException {
+      JobIdMismatchException, NoSlavesExistException {
     ZMQEndpoint endpoint =
         new ZMQEndpoint("localhost", "ipc", "ipc://".concat(getUniqueFileName("execute.ipc")));
     TestServer server = new TestServer(endpoint);
