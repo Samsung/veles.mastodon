@@ -5,7 +5,6 @@ import java.security.NoSuchAlgorithmException;
 
 import org.apache.log4j.Logger;
 
-import com.samsung.veles.mastodon.JobIdMismatchException;
 import com.samsung.veles.mastodon.NoSlavesExistException;
 import com.samsung.veles.mastodon.UnsupportedObjectException;
 import com.samsung.veles.mastodon.VelesManager;
@@ -19,8 +18,7 @@ public class App {
   static Logger log = Logger.getLogger(VelesManager.class.getName());
 
   public static void main(String[] args) throws IOException, UnsupportedObjectException,
-      NoSuchAlgorithmException, NumberFormatException, NoSlavesExistException,
-      JobIdMismatchException {
+      NoSuchAlgorithmException, NumberFormatException, NoSlavesExistException {
     // Calculate the workflow checksum
     String checksum = VelesManager.checksum(args[2]);
     log.info(String.format("Workflow checksum: %s", checksum));

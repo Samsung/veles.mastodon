@@ -12,9 +12,9 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Formatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -293,6 +293,7 @@ public class VelesManager {
   private ZMQ.Socket _socket;
   private OutputStream _out;
   private InputStream _in;
+  private HashMap<String, Object> _results = new HashMap<>();
 
   public long getFD() {
     return _socket.getFD();
@@ -350,19 +351,50 @@ public class VelesManager {
   /**
    * Block until the result of the task previously sent with submit() is received and return it.
    * 
-   * @param id The expected result identifier (obtained from submit()).
+   * @param id The result identifier (obtained from submit()). If null, any result which has been
+   *        already received is returned.
    * @return The result of the VELES processing.
    * @throws IOException
-   * @throws JobIdMismatchException
    */
-  public Object yield(String id) throws IOException, JobIdMismatchException {
+  public Object yield(String id) throws IOException {
     Object res;
     synchronized (this) {
-      InputStream uncompressed_in = getUncompressedStream(_in, id);
-      res = _unpickler.load(uncompressed_in);
-      uncompressed_in.close();
+      if (id == null && _results.size() > 0) {
+        id = _results.keySet().iterator().next();
+      }
+      while (!_results.containsKey(id)) {
+        StringBuilder anotherId = new StringBuilder();
+        InputStream uncompressed_in = getUncompressedStream(_in, anotherId);
+        if (id == null) {
+          id = anotherId.toString();
+        }
+        _results.put(anotherId.toString(), _unpickler.load(uncompressed_in));
+        uncompressed_in.close();
+      }
+      res = _results.get(id);
+      _results.remove(id);
     }
     return res;
+  }
+
+  /**
+   * Block until any task result is received and return it's identifier. It can be retrieved later
+   * via yield(<poll() result>). This method is supposed to work together with epoll()-ing of
+   * getFD() in asynchronous frameworks.
+   * 
+   * @return
+   * @throws IOException
+   */
+  public String poll() throws IOException {
+    String id;
+    synchronized (this) {
+      StringBuilder anotherId = new StringBuilder();
+      InputStream uncompressed_in = getUncompressedStream(_in, anotherId);
+      id = anotherId.toString();
+      _results.put(id, _unpickler.load(uncompressed_in));
+      uncompressed_in.close();
+    }
+    return id;
   }
 
   /**
@@ -374,11 +406,10 @@ public class VelesManager {
    * @throws PickleException
    * @throws IOException
    * @throws UnsupportedObjectException The specified job object is not pickleable.
-   * @throws JobIdMismatchException
    * @throws NoSlavesExistException
    */
   public Object execute(Object job) throws IOException, UnsupportedObjectException,
-      JobIdMismatchException, NoSlavesExistException {
+      NoSlavesExistException {
     return execute(job, Compression.Snappy);
   }
 
@@ -395,7 +426,7 @@ public class VelesManager {
    * @throws NoSlavesExistException
    */
   public Object execute(Object job, Compression compression) throws IOException,
-      UnsupportedObjectException, JobIdMismatchException, NoSlavesExistException {
+      UnsupportedObjectException, NoSlavesExistException {
     String id = submit(job, compression);
     return yield(id);
   }
@@ -440,14 +471,11 @@ public class VelesManager {
     }
   }
 
-  private static InputStream getUncompressedStream(InputStream input, String expectedId)
-      throws IOException, JobIdMismatchException {
+  private static InputStream getUncompressedStream(InputStream input, StringBuilder id)
+      throws IOException {
     byte[] msgId = new byte[36];
     input.read(msgId);
-    if (!Arrays.equals(msgId, expectedId.getBytes())) {
-      throw new JobIdMismatchException();
-    }
-
+    id.append(new String(msgId));
     byte[] mark = new byte[PICKLE_BEGIN.length + 1];
     input.read(mark);
     for (int i = 0; i < PICKLE_BEGIN.length; i++) {
