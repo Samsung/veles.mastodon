@@ -31,11 +31,16 @@ public class ZMQEndpoint {
    */
   public String host;
   /**
-   * The detailed parameters.
+   * The full ZeroMQ endpoint string, e.g. tcp://192.168.0.1:2000.
    */
   public String uri;
   /**
    * The transport name, e.g. tcp or inproc.
    */
   public String type;
+
+  @Override
+  public String toString() {
+    return String.format("(%s) %s", host, uri);
+  }
 }

@@ -141,6 +141,7 @@ public class VelesManager {
     int total_length = 0;
 
     // Send the request to master node
+    log.debug(String.format("Communicating with %s:%d...", _host, _port));
     Socket master = new Socket(this._host, this._port);
     try {
       InputStream in = master.getInputStream();
@@ -258,6 +259,7 @@ public class VelesManager {
     List<ZMQEndpoint> list = dist.get(Collections.min(dist.keySet()));
     Random generator = new Random();
     _currentEndpoint = list.get(generator.nextInt(list.size()));
+    log.debug(String.format("Selected %s", _currentEndpoint.toString()));
   }
 
   private void refresh() throws UnknownHostException, IOException, NoSlavesExistException {
@@ -332,6 +334,8 @@ public class VelesManager {
       if (_counter++ >= _refresh_interval) {
         refresh();
       }
+      log.debug(String.format("[%d] submitting a new job of type %s", _counter, job.getClass()
+          .toString()));
       OutputStream compressed_out = getCompressedStream(_out, compression, id);
       try {
         _pickler.dump(job, compressed_out);
