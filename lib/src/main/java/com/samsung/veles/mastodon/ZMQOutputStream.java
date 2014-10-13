@@ -4,8 +4,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 
 import org.zeromq.ZMQ;
+import org.zeromq.ZMQ.Socket;
 
-public class ZMQOutputStream extends OutputStream {
+public class ZMQOutputStream extends OutputStream implements IZMQStream {
   private static final byte PICKLE_END[] = {'v', 'p', 'e'};
   private final ZMQ.Socket _socket;
 
@@ -32,5 +33,10 @@ public class ZMQOutputStream extends OutputStream {
   @Override
   public void close() {
     _socket.send(PICKLE_END, ZMQ.NOBLOCK);
+  }
+
+  @Override
+  public Socket getSocket() {
+    return _socket;
   }
 }

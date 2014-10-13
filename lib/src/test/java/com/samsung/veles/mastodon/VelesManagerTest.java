@@ -26,6 +26,7 @@ import net.razorvine.pickle.Unpickler;
 import org.apache.log4j.BasicConfigurator;
 import org.apache.log4j.Logger;
 import org.zeromq.ZMQ;
+import org.zeromq.ZMQ.Context;
 
 import com.samsung.veles.mastodon.VelesManager.Compression;
 
@@ -292,6 +293,88 @@ public class VelesManagerTest extends TestCase {
     validateTestObject(back);
   }
 
+  private class ZMQFakeSocket extends ZMQ.Socket {
+    protected ZMQFakeSocket(Context context, int type) {
+      super(context, type);
+    }
+
+    @Override
+    public long getFD() {
+      return 0;
+    }
+  }
+
+  private class ZMQFakeInputStream extends ZMQInputStream {
+    private final ByteArrayInputStream _real;
+
+    public ZMQFakeInputStream(byte[] buf, ZMQ.Socket socket) {
+      super(socket);
+      _real = new ByteArrayInputStream(buf);
+    }
+
+    @Override
+    public int read() throws IOException {
+      return _real.read();
+    }
+
+    @Override
+    public int read(byte[] b) {
+      try {
+        return _real.read(b);
+      } catch (IOException e) {
+        return 0;
+      }
+    }
+
+    @Override
+    public int read(byte[] b, int off, int len) {
+      return _real.read(b, off, len);
+    }
+
+    @Override
+    public void close() {}
+
+    @Override
+    public int available() {
+      return _real.available();
+    }
+  }
+
+  private class ZMQFakeOutputStream extends ZMQOutputStream {
+    private final ByteArrayOutputStream _real;
+
+    public ZMQFakeOutputStream() {
+      super(null);
+      _real = new ByteArrayOutputStream();
+    }
+
+    @Override
+    public void write(int b) throws IOException {
+      _real.write(b);
+    }
+
+    @Override
+    public void write(byte[] b) {
+      try {
+        _real.write(b);
+      } catch (IOException e) {
+      }
+    }
+
+    @Override
+    public void write(byte[] b, int off, int len) {
+      _real.write(b, off, len);
+    }
+
+    @Override
+    public void close() {}
+
+    public byte[] toByteArray() {
+      return _real.toByteArray();
+    }
+  }
+
+  @SuppressWarnings("unchecked")
   public void testExecutePickling() throws PickleException, IllegalAccessException,
       IllegalArgumentException, InvocationTargetException, IOException, NoSuchMethodException,
       SecurityException, NoSuchFieldException {
@@ -299,21 +382,36 @@ public class VelesManagerTest extends TestCase {
     submit.setAccessible(true);
     Method yield = VelesManager.class.getDeclaredMethod("yield", String.class);
     yield.setAccessible(true);
-    Field in = VelesManager.class.getDeclaredField("_in");
-    in.setAccessible(true);
     Field out = VelesManager.class.getDeclaredField("_out");
     out.setAccessible(true);
-
+    Field pending = VelesManager.class.getDeclaredField("_pending");
+    pending.setAccessible(true);
+    Field field = VelesManager.class.getDeclaredField("_socket");
+    field.setAccessible(true);
+    ZMQ.Socket socket = (ZMQ.Socket) field.get(VelesManager.instance());
+    if (socket != null) {
+      socket.close();
+    }
+    Field context = VelesManager.class.getDeclaredField("_context");
+    context.setAccessible(true);
+    socket = new ZMQFakeSocket((ZMQ.Context) context.get(VelesManager.instance()), ZMQ.DEALER);
+    field.set(VelesManager.instance(), socket);
+    field = VelesManager.class.getDeclaredField("_socket_refs");
+    field.setAccessible(true);
+    ((TreeMap<Long, Integer>) field.get(VelesManager.instance())).put(socket.getFD(), 0);
 
     Object job = getTestObject();
 
     for (VelesManager.Compression codec : VelesManager.Compression.values()) {
-      ByteArrayOutputStream fake_out = new ByteArrayOutputStream();
+      ZMQFakeOutputStream fake_out = new ZMQFakeOutputStream();
       out.set(VelesManager.instance(), fake_out);
       String id = (String) submit.invoke(VelesManager.instance(), job, codec);
       byte[] ser = fake_out.toByteArray();
       log.debug(String.format("Codec %s yielded %d bytes", codec.name(), ser.length));
-      in.set(VelesManager.instance(), new ByteArrayInputStream(ser));
+      @SuppressWarnings("unchecked")
+      TreeMap<String, ZMQInputStream> _pending =
+          (TreeMap<String, ZMQInputStream>) pending.get(VelesManager.instance());
+      _pending.put(id, new ZMQFakeInputStream(ser, socket));
       Object res = yield.invoke(VelesManager.instance(), id);
       validateTestObject(res);
     }

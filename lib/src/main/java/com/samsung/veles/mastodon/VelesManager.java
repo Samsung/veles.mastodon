@@ -55,6 +55,9 @@ public class VelesManager {
           _instance = new VelesManager();
           Runtime.getRuntime().addShutdownHook(new Thread() {
             public void run() {
+              for (Map.Entry<String, ZMQInputStream> pair : _instance._pending.entrySet()) {
+                _instance.popJob(pair.getValue().getSocket(), pair.getKey());
+              }
               if (_instance._socket != null) {
                 _instance._socket.close();
               }
@@ -223,12 +226,15 @@ public class VelesManager {
    */
   private void openStreams() {
     if (_socket != null) {
-      _socket.close();
+      if (_socket_refs.get(getFD()) == 0) {
+        _socket_refs.remove(getFD());
+        _socket.close();
+      }
     }
     _socket = _context.socket(ZMQ.DEALER);
+    _socket_refs.put(getFD(), 0);
     _socket.connect(_currentEndpoint.uri);
     _in = new ZMQInputStream(_socket);
-    // No need to dispose _out - the socket's been already closed in _in.dispose()
     _out = new ZMQOutputStream(_socket);
   }
 
@@ -291,9 +297,11 @@ public class VelesManager {
   private final Unpickler _unpickler = new Unpickler();
   private final ZMQ.Context _context = ZMQ.context(1);
   private ZMQ.Socket _socket;
-  private OutputStream _out;
-  private InputStream _in;
+  private ZMQOutputStream _out;
+  private ZMQInputStream _in;
   private HashMap<String, Object> _results = new HashMap<>();
+  private TreeMap<String, ZMQInputStream> _pending = new TreeMap<>();
+  private TreeMap<Long, Integer> _socket_refs = new TreeMap<>();
 
   public long getFD() {
     return _socket.getFD();
@@ -301,6 +309,22 @@ public class VelesManager {
 
   public enum Compression {
     None, Gzip, Snappy, Lzma2
+  }
+
+  private void pushJob(String id) {
+    _socket_refs.put(getFD(), _socket_refs.get(getFD()) + 1);
+    _pending.put(id, _in);
+  }
+
+  private void popJob(ZMQ.Socket socket, String id) {
+    _pending.remove(id);
+    int refs = _socket_refs.get(socket.getFD());
+    if (refs == 1 && socket != _socket) {
+      _socket_refs.remove(socket.getFD());
+      socket.close();
+    } else {
+      _socket_refs.put(socket.getFD(), refs - 1);
+    }
   }
 
   /**
@@ -344,6 +368,7 @@ public class VelesManager {
         throw new UnsupportedObjectException();
       }
       compressed_out.close();
+      pushJob(id);
     }
     return id;
   }
@@ -362,14 +387,16 @@ public class VelesManager {
       if (id == null && _results.size() > 0) {
         id = _results.keySet().iterator().next();
       }
+      ZMQInputStream in = _pending.get(id);
       while (!_results.containsKey(id)) {
         StringBuilder anotherId = new StringBuilder();
-        InputStream uncompressed_in = getUncompressedStream(_in, anotherId);
+        InputStream uncompressed_in = getUncompressedStream(in, anotherId);
         if (id == null) {
           id = anotherId.toString();
         }
         _results.put(anotherId.toString(), _unpickler.load(uncompressed_in));
         uncompressed_in.close();
+        popJob(in.getSocket(), id);
       }
       res = _results.get(id);
       _results.remove(id);

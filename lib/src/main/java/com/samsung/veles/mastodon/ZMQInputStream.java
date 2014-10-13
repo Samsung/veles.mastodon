@@ -4,8 +4,9 @@ import java.io.IOException;
 import java.io.InputStream;
 
 import org.zeromq.ZMQ;
+import org.zeromq.ZMQ.Socket;
 
-public class ZMQInputStream extends InputStream {
+public class ZMQInputStream extends InputStream implements IZMQStream {
   private final ZMQ.Socket _socket;
   private byte[] _unread;
   private int _unread_pos = 0;
@@ -84,5 +85,10 @@ public class ZMQInputStream extends InputStream {
   @Override
   public boolean markSupported() {
     return false;
+  }
+
+  @Override
+  public Socket getSocket() {
+    return _socket;
   }
 }
