@@ -1,0 +1,6 @@
+.gitignore export-ignore
+.gitmodules export-ignore
+.gitattributes export-ignore
+lib/.settings export-ignore
+lib/.classpath export-ignore
+lib/.project export-ignore
