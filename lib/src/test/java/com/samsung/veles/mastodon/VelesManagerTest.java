@@ -93,13 +93,13 @@ public class VelesManagerTest extends TestCase {
 
     ZMQEndpoint goldEndpoint =
         new ZMQEndpoint("markovtsevu64", "ipc", "ipc:///tmp/veles-ipc-zmqloader-dnioqryd");
-    assertEquals(goldEndpoint, list.get(0));
+    assertTrue(list.contains(goldEndpoint));
     goldEndpoint.type = "tcp";
     goldEndpoint.uri = "tcp://markovtsevu64:52937";
-    assertEquals(goldEndpoint, list.get(1));
+    assertTrue(list.contains(goldEndpoint));
     goldEndpoint.type = "inproc";
     goldEndpoint.uri = "inproc://veles-zmqloader-ZeroMQLoader";
-    assertEquals(goldEndpoint, list.get(2));
+    assertTrue(list.contains(goldEndpoint));
   }
 
   public void testChecksum() throws IOException {
@@ -408,7 +408,6 @@ public class VelesManagerTest extends TestCase {
       String id = (String) submit.invoke(VelesManager.instance(), job, codec);
       byte[] ser = fake_out.toByteArray();
       log.debug(String.format("Codec %s yielded %d bytes", codec.name(), ser.length));
-      @SuppressWarnings("unchecked")
       TreeMap<String, ZMQInputStream> _pending =
           (TreeMap<String, ZMQInputStream>) pending.get(VelesManager.instance());
       _pending.put(id, new ZMQFakeInputStream(ser, socket));
